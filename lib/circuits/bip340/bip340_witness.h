@@ -12,8 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#ifndef PRIVACY_PROOFS_ZK_LIB_CIRCUITS_TESTS_EC_BIP340_BIP340_WITNESS_H_
-#define PRIVACY_PROOFS_ZK_LIB_CIRCUITS_TESTS_EC_BIP340_BIP340_WITNESS_H_
+#ifndef PRIVACY_PROOFS_ZK_LIB_CIRCUITS_BIP340_BIP340_WITNESS_H_
+#define PRIVACY_PROOFS_ZK_LIB_CIRCUITS_BIP340_BIP340_WITNESS_H_
 
 #include <cstddef>
 #include <cstdint>
@@ -263,4 +263,4 @@ class Bip340Witness {
 
 }  // namespace proofs
 
-#endif  // PRIVACY_PROOFS_ZK_LIB_CIRCUITS_TESTS_EC_BIP340_BIP340_WITNESS_H_
+#endif  // PRIVACY_PROOFS_ZK_LIB_CIRCUITS_BIP340_BIP340_WITNESS_H_

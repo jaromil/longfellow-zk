@@ -294,7 +294,7 @@ The `.gestalt/plans/secp256k1-native-proving.org` plan follows a structured work
 ## BIP-340 / Schnorr Verification (2026-07-03)
 
 A vertical slice for BIP-340 Schnorr signature verification over native
-secp256k1 is in `lib/circuits/tests/ec/bip340/`:
+secp256k1 is in `lib/circuits/bip340/`:
 
 | File | Purpose |
 |------|---------|
