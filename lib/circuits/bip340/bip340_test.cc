@@ -3,7 +3,7 @@
 // Licensed under the Apache License, Version 2.0 (the "License");
 // ...
 
-#include "circuits/tests/ec/bip340/bip340_verify.h"
+#include "circuits/bip340/bip340_verify.h"
 
 #include <cstddef>
 #include <cstdint>
@@ -18,8 +18,8 @@
 #include "circuits/logic/compiler_backend.h"
 #include "circuits/logic/evaluation_backend.h"
 #include "circuits/logic/logic.h"
-#include "circuits/tests/ec/bip340/bip340_guard.h"
-#include "circuits/tests/ec/bip340/bip340_witness.h"
+#include "circuits/bip340/bip340_guard.h"
+#include "circuits/bip340/bip340_witness.h"
 #include "ec/p256k1.h"
 #include "random/secure_random_engine.h"
 #include "random/transcript.h"
