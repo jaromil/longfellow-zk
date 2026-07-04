@@ -1,17 +1,18 @@
 """
-BIP-340 circuit and witness generation as a Longfellow sumcheck circuit.
+BIP-340 reference circuit and witness generation for Sage tests.
 
 Sage reference/spec circuit: models the final algebraic relation plus
 ry-bitness and even-parity constraints.  This circuit does NOT compute
 scalar multiplication internally — sG and eP are provided as witness
 inputs and the circuit checks the projective relation R = sG - eP.
 
-NOTE: The Sage circuit uses a simplified projective check that holds
-for the BIP-340 test vectors but is NOT a general EC verification.
-It serves as a spec for the constraint layout (parity, bitness) while
-the C++ Bip340Verify circuit provides the production implementation.
+NOTE: The Sage circuit uses a simplified projective check that is only
+for reference testing of public/witness facts, parity, and bitness.  It
+is not constraint-isomorphic to the production C++ verifier and is not
+a general EC verification circuit.  The C++ Bip340Verify circuit is the
+production implementation.
 
-Corresponds to lib/circuits/bip340/bip340_verify.h and
+References lib/circuits/bip340/bip340_verify.h and
 lib/circuits/bip340/bip340_witness.h.
 """
 
@@ -80,15 +81,14 @@ def make_bip340_test_circuit() -> Circuit:
       [14] = px³
       [15]..[270] = ry_bits[0..255]  (MSB-first)
 
-    Gates (263 outputs):
+    Gates (262 outputs):
       0:  py² - px³ - b = 0                (P on curve)
       1:  sGx - ePx - rx·sGz = 0           (R.x projective, simplified)
       2:  sGy - ePy - ry·sGz = 0           (R.y projective, simplified)
       3:  sGz · rz_inv - 1 = 0             (R finite)
       4..259:  ry_bits[i]·(ry_bits[i]-1) = 0  (bitness, 256 gates)
       260:  Σ(ry_bits[i]·2^(255-i)) - ry = 0  (reconstruction)
-      261:  ry² - rx³ - b = 0              (R on curve; rx³ is witness)
-      262:  ry_bits[255] = 0               (LSB zero → ry even)
+      261:  ry_bits[255] = 0               (LSB zero → ry even)
     """
     K = F
     NUM_INPUTS = 271
@@ -137,11 +137,10 @@ def make_bip340_test_circuit() -> Circuit:
                           coefficient=coeff))
     quads.append(Quad(gate=gate_rc, input_0=11, input_1=0, coefficient=K(-1)))
 
-    # Gate 261: ry² - rx³ - b = 0  (R on curve; rx³ from witness wire 271+)
-    # rx³ is NOT in the current witness — skip this gate for simplified model.
-    # Instead we verify R on curve via Sage's EC arithmetic in the test.
+    # The production C++ circuit proves R is on-curve.  This reference model
+    # checks that fact through Sage EC arithmetic in tests, not as a gate here.
 
-    # Gate 262: ry_bits[255] = 0  (LSB zero)
+    # Gate 261: ry_bits[255] = 0  (LSB zero)
     gate_lsb = gate_rc + 1  # 261, skip curve check
     quads.append(Quad(gate=gate_lsb, input_0=RY_BITS_BASE + 255, input_1=0,
                       coefficient=K(1)))

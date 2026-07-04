@@ -607,6 +607,36 @@ TEST(Bip340SoundnessTest, OddRYWitnessFails) {
   }
 }
 
+TEST(Bip340SoundnessTest, RejectsScalarSAtOrAboveCurveOrder) {
+  using EvalBackend = EvaluationBackend<Field>;
+  using LogicType = Logic<Field, EvalBackend>;
+  using VerifyC = Bip340Verify<LogicType, Field, EC>;
+
+  const Field& F = p256k1_base;
+  const EC& ec = p256k1;
+
+  auto d = MakeTestData();
+
+  // n + 2 is congruent to the valid test scalar 2 modulo the secp256k1
+  // group order, so the group equation still holds.  The circuit must
+  // reject it because BIP-340 requires the encoded scalar to satisfy s < n.
+  Nat s_plus_n(
+      "0xfffffffffffffffffffffffffffffffebaaedce6af48a03bbfd25e8cd0364143");
+  Bip340Witness wit(ec);
+  ASSERT_TRUE(wit.compute_from_scalars(s_plus_n, d.e_nat, d.px, d.py));
+
+  const EvalBackend ebk(F, false);
+  const LogicType l(&ebk, F);
+  VerifyC circuit(l, ec);
+
+  auto w = MakeEvalWitness<LogicType, VerifyC>(l, wit);
+  circuit.assert_verify(l.konst(d.rx), l.konst(d.px),
+                         l.konst(wit.e_), w);
+
+  EXPECT_TRUE(ebk.assertion_failed())
+      << "Scalar s >= n should be rejected even when the group equation holds";
+}
+
 // ====================== Mutation Tests ==================================
 
 TEST(Bip340MutationTest, PrivateWitnessMutations) {

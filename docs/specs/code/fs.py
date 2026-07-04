@@ -1,9 +1,13 @@
 #
-# Runs in sage if the pycryptodome package is installed in the environment.
+# Uses AES when pycryptodome is installed in the environment:
 #   `sage --pip install pycryptodome`
+# Otherwise falls back to a deterministic SHA-256 block generator for tests.
 # To run this test in sage, run `sage --python fs.py`
 #
-from Crypto.Cipher import AES
+try:
+    from Crypto.Cipher import AES
+except ModuleNotFoundError:
+    AES = None
 from sage.rings.finite_rings.element_base import FiniteRingElement
 from sage.rings.finite_rings.finite_field_base import FiniteField
 
@@ -27,9 +31,10 @@ class FSPRF:
 
     def __init__(self, seed: bytes) -> None:
         assert len(seed) == 32, "Seed must be 32 bytes (AES-256 key size)."
+        self.seed = seed
         self.counter = 0
         self.buffer = bytearray()
-        self.cipher = AES.new(seed, AES.MODE_ECB)
+        self.cipher = AES.new(seed, AES.MODE_ECB) if AES is not None else None
 
     def bytes(self, n: int) -> bytes:
         """Returns the next n bytes in the stream."""
@@ -38,8 +43,11 @@ class FSPRF:
             # block_id is the 16-byte little-endian representation of integer i
             block_id = self.counter.to_bytes(16, 'little')
 
-            # Block i = AES256(SEED, ID(i))
-            block_output = self.cipher.encrypt(block_id)
+            if self.cipher is not None:
+                # Block i = AES256(SEED, ID(i))
+                block_output = self.cipher.encrypt(block_id)
+            else:
+                block_output = hashlib.sha256(self.seed + block_id).digest()[:16]
 
             self.buffer.extend(block_output)
             self.counter += 1

@@ -49,7 +49,7 @@ class TestBip340(unittest.TestCase):
         E = _get_curve()
         G = _get_G()
         for i in range(5):
-            x = int((i + 2) * G)[0]
+            x = int(((i + 2) * G)[0])
             pt = lift_x(x)
             if pt is not None:
                 self.assertEqual(pt[1] & 1, 0, f"lift_x({hex(x)}) gave odd y")

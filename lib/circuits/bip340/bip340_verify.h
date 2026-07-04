@@ -37,6 +37,7 @@ namespace proofs {
 ///
 /// Circuit constraints:
 ///   - e is reconstructed from bits_e[256] (MSB-first).
+///   - s is range-checked as a scalar: 0 <= s < n.
 ///   - py² = px³ + 7  (P is on the secp256k1 curve).
 ///   - ry² = rx³ + 7  (R is on the secp256k1 curve).
 ///   - Double-and-add trace for s·G with intermediate witnesses.
@@ -66,6 +67,8 @@ template <class LogicCircuit, class Field, class EC>
 class Bip340Verify {
   using EltW = typename LogicCircuit::EltW;
   using Elt = typename LogicCircuit::Elt;
+  using Nat = typename Field::N;
+  using Bitvec = typename LogicCircuit::v256;
   static constexpr size_t kBits = EC::kBits;
 
  public:
@@ -111,7 +114,13 @@ class Bip340Verify {
     }
   };
 
-  Bip340Verify(const LogicCircuit& lc, const EC& ec) : lc_(lc), ec_(ec) {}
+  Bip340Verify(const LogicCircuit& lc, const EC& ec) : lc_(lc), ec_(ec) {
+    Nat order(
+        "0xfffffffffffffffffffffffffffffffebaaedce6af48a03bbfd25e8cd0364141");
+    for (size_t i = 0; i < kBits; ++i) {
+      bits_n_[i] = lc_.bit(order.bit(i));
+    }
+  }
 
   /// Verify the BIP-340 relation: s·G - e·P = R, with R.x == rx.
   ///
@@ -136,39 +145,51 @@ class Bip340Verify {
       lc_.assert_eq(check, e);
     }
 
-    // -- 1. Lift P: verify py² = px³ + b (secp256k1: b = 7) --------------
+    // -- 1. Verify s is a canonical secp256k1 scalar ---------------------
+    // bits_s is MSB-first for scalar_mult(), while Logic::vlt expects
+    // bit-vectors with the least-significant bit at index 0.
+    {
+      Bitvec bits_s;
+      for (size_t i = 0; i < kBits; ++i) {
+        bits_s[kBits - 1 - i] =
+            typename LogicCircuit::BitW(w.bits_s[i], lc_.f_);
+      }
+      lc_.assert1(lc_.vlt(bits_s, bits_n_));
+    }
+
+    // -- 2. Lift P: verify py² = px³ + b (secp256k1: b = 7) --------------
     assert_point_on_curve(px, w.py);
 
-    // -- 2. Compute s·G ---------------------------------------------------
+    // -- 3. Compute s·G ---------------------------------------------------
     EltW gx = lc_.konst(ec_.gx_);
     EltW gy = lc_.konst(ec_.gy_);
     EltW sgx = zero, sgy = one, sgz = zero;
     scalar_mult(sgx, sgy, sgz, gx, gy, one, w.bits_s, w.int_sx, w.int_sy,
                 w.int_sz);
 
-    // -- 3. Compute e·P  (P = (px, py, 1)) -------------------------------
+    // -- 4. Compute e·P  (P = (px, py, 1)) -------------------------------
     EltW epx = zero, epy = one, epz = zero;
     scalar_mult(epx, epy, epz, px, w.py, one, w.bits_e, w.int_ex, w.int_ey,
                 w.int_ez);
 
-    // -- 4. Compute R = sG - eP = sG + (-eP) ------------------------------
+    // -- 5. Compute R = sG - eP = sG + (-eP) ------------------------------
     EltW neg_epy = lc_.sub(zero, epy);
     EltW rpx, rpy, rpz;
     addE(rpx, rpy, rpz, sgx, sgy, sgz, epx, neg_epy, epz);
 
-    // -- 5. Verify R is on the curve and finite --------------------------
+    // -- 6. Verify R is on the curve and finite --------------------------
     assert_point_on_curve(rx, w.ry);
 
     // R.z * rz_inv = 1  ⟺  R is not the point at infinity.
     lc_.assert_eq(lc_.mul(rpz, w.rz_inv), one);
 
-    // -- 6. Check R.x == rx (projective) ---------------------------------
+    // -- 7. Check R.x == rx (projective) ---------------------------------
     lc_.assert_eq(rpx, lc_.mul(rx, rpz));   // R.x * 1 == rx * R.z
 
-    // -- 7. Check R.y == ry (projective) ---------------------------------
+    // -- 8. Check R.y == ry (projective) ---------------------------------
     lc_.assert_eq(rpy, lc_.mul(w.ry, rpz));  // R.y * 1 == ry * R.z
 
-    // -- 8. Verify ry bitness and even parity ----------------------------
+    // -- 9. Verify ry bitness and even parity ----------------------------
     // bits_ry[0] is MSB, bits_ry[kBits-1] is LSB.
     EltW ry_check = lc_.konst(lc_.zero());
     for (size_t i = 0; i < kBits; ++i) {
@@ -334,6 +355,7 @@ class Bip340Verify {
 
   const LogicCircuit& lc_;
   const EC& ec_;
+  Bitvec bits_n_;
 };
 
 }  // namespace proofs

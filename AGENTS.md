@@ -150,7 +150,7 @@ sudo apt install -y build-essential clang cmake libssl-dev libzstd-dev libgtest-
 
 ## Current State (2026-07-04)
 
-- **299/299 CTest tests pass** on `bip340-production`.
+- **300/300 CTest tests pass** on `bip340-production`.
 - **Native secp256k1 ZK proof tests are wired to CTest:**
   - `lib/circuits/tests/ec/pk_circuit_test.cc` — typed tests for P256 + P256K1,
     including `ZkProverVerifier` using the CRT backend.
@@ -299,6 +299,7 @@ in `lib/circuits/bip340/`.  The circuit proves:
 
   - Point-on-curve for P and R.
   - Double-and-add trace for s·G and e·P.
+  - Canonical scalar range for s: `0 <= s < n`.
   - R = s·G - e·P finite (R.z * rz_inv = 1).
   - R.x == rx, R.y == ry (projective equality).
   - ry reconstructed from 256 witness bits (MSB-first).
@@ -306,10 +307,10 @@ in `lib/circuits/bip340/`.  The circuit proves:
   - LSB of ry = 0 (canonical evenness).
 
 **Circuit metrics (single BIP-340 verify):**
-wires=26,336, quad_terms=40,650, depth=8, block_enc≈42,955, padding=65,536
+wires=26,802, quad_terms=41,443, depth=9, block_enc≈43,748, padding=65,536
 
-**Tests:** 17 BIP-340 tests (eval, vectors, ZK prover/verifier, soundness,
-mutation, guard, params, scale).  299/299 full CTest passes.
+**Tests:** 20 BIP-340 CTest tests (eval, vectors, ZK prover/verifier,
+soundness, mutation, guard, params, scale).  300/300 full CTest passes.
 
 ### Backend
 
@@ -318,16 +319,22 @@ native secp256k1 proofs.  Do NOT use the P-256 `Fp2` FFT path for secp256k1.
 
 ### Sage
 
-Sage tests live under `docs/specs/code/tests/test_bip340*.py`.  They
-require `sage.all` — use the Sage command (`sage -python ...`) to run
-them; plain `python3` cannot import `sage.all`.
+Sage tests live under `docs/specs/code/tests/test_bip340*.py`.  Run all
+BIP-340 Sage tests with:
+
+```bash
+./docs/specs/code/run_bip340_sage_tests.sh
+```
+
+The runner uses a Python that can import `sage.all` and falls back to
+`sage -python` when available.
 
 | File | Purpose |
 |------|---------|
 | `bip340_verify.h` | Circuit: `s·G - e·P = R` with x-only keys, double-and-add |
 | `bip340_witness.h` | Witness generator: `compute_from_scalars()` for testing, `compute()` for real sigs |
 | `bip340_guard.h` | CRT capacity guard: rejects `block_enc` exceeding `2^22` FFT order |
-| `bip340_test.cc` | 17 tests: eval, vectors, ZK prover/verifier, soundness, mutation, guard, params, scale |
+| `bip340_test.cc` | 20 tests: eval, vectors, ZK prover/verifier, soundness, mutation, guard, params, scale |
 
 **Proving backend:** Always use `CrtConvolutionFactory<CRT256<Fp256k1Base>, Fp256k1Base>`.
 The `bip340_guard.h` provides `check_crt_block_enc<CRT>()` to catch oversized
