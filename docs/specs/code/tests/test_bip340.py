@@ -66,32 +66,26 @@ class TestBip340(unittest.TestCase):
 
     def test_empty_signature_fails(self) -> None:
         """Empty/zero signature is rejected."""
-        pk = TEST_VECTORS[0]["pk"]
-        sig = bytes(64)  # all zeros
-        self.assertFalse(verify(pk, b"", sig))
+        tv = TEST_VECTORS[0]
+        self.assertFalse(verify(tv["pk"], tv["msg"], bytes(64)))
 
     def test_zero_public_key_fails(self) -> None:
-        """x=0 is not a valid public key."""
-        sig = TEST_VECTORS[0]["sig"]
-        pk = bytes(32)  # all zeros
-        self.assertFalse(verify(pk, b"", sig))
+        """x=0 is not a valid public key (no even-y point)."""
+        tv = TEST_VECTORS[0]
+        self.assertFalse(verify(bytes(32), tv["msg"], tv["sig"]))
 
     def test_tampered_signature_fails(self) -> None:
         """Flipping a bit in a valid signature invalidates it."""
         tv = TEST_VECTORS[0]
         sig = bytearray(tv["sig"])
-        sig[10] ^= 0x01  # flip one bit
-        self.assertFalse(
-            verify(tv["pk"], tv["msg"], bytes(sig))
-        )
+        sig[10] ^= 0x01
+        self.assertFalse(verify(tv["pk"], tv["msg"], bytes(sig)))
 
     def test_wrong_lengths_rejected(self) -> None:
         """Malformed inputs are rejected gracefully."""
         tv = TEST_VECTORS[0]
-        # Wrong pk length.
         self.assertFalse(verify(b"x" * 31, tv["msg"], tv["sig"]))
         self.assertFalse(verify(b"x" * 33, tv["msg"], tv["sig"]))
-        # Wrong sig length.
         self.assertFalse(verify(tv["pk"], tv["msg"], b"x" * 63))
         self.assertFalse(verify(tv["pk"], tv["msg"], b"x" * 65))
 
