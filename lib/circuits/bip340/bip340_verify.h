@@ -19,26 +19,49 @@
 
 namespace proofs {
 
-/// Verifies the BIP-340 / Schnorr signature relation over secp256k1:
+/// Production BIP-340 / Schnorr signature verification over secp256k1.
 ///
 ///   s·G = R + e·P
 ///
-/// where G is the secp256k1 generator, P = (px, py) with py² = px³ + 7,
-/// e is the Fiat-Shamir challenge, and R is a curve point whose
-/// x-coordinate equals the public input rx.
+/// --- In-circuit (proven) ---
 ///
-/// The circuit uses the same double-and-add pattern as Ecpk, with
-/// witnessed intermediate points to keep the multiplicative depth low.
+/// Public field inputs, in order: rx, px, e.
+///   rx : R.x (x-only, 32 bytes after BIP-340 parse).
+///   px : P.x (x-only public key).
+///   e  : Fiat-Shamir challenge scalar (field element).
 ///
-/// Public inputs:  rx (R.x), px (P.x), e (challenge scalar)
-/// Witness inputs: bits_s[256], int_s_{x,y,z}[255] for s·G,
-///                 bits_e[256], int_e_{x,y,z}[255] for e·P,
-///                 py (P.y, the even square root)
+/// Private witness: bits_s[256], int_s_{x,y,z}[255] for s·G;
+///   bits_e[256], int_e_{x,y,z}[255] for e·P;
+///   py (P.y, the even square root);
+///   ry (affine R.y); rz_inv (R.z inverse); ry_bits[256].
 ///
-/// NOTE: The even-y check on R is not yet enforced in-circuit.
-///       The circuit only checks x-coordinate equality. Full BIP-340
-///       compliance requires additionally verifying that the normalized
-///       y-coordinate of R is even.
+/// Circuit constraints:
+///   - e is reconstructed from bits_e[256] (MSB-first).
+///   - py² = px³ + 7  (P is on the secp256k1 curve).
+///   - ry² = rx³ + 7  (R is on the secp256k1 curve).
+///   - Double-and-add trace for s·G with intermediate witnesses.
+///   - Double-and-add trace for e·P with intermediate witnesses.
+///   - R = s·G - e·P computed in projective coordinates.
+///   - R.z * rz_inv = 1  (R is not the point at infinity).
+///   - R.x = rx  (projective equality: R.x * 1 == rx * R.z).
+///   - R.y = ry  (projective equality; ry is the affine y).
+///   - ry is canonically even: ry_bits[255] (LSB) = 0, and
+///     ry reconstructed from ry_bits[256] matches ry.
+///   - Each ry_bits[i] ∈ {0,1}.
+///
+/// --- Outside the circuit (witness/verifier validation) ---
+///
+/// Witness generation checks before building the circuit:
+///   - Byte-length validation: sig 64 bytes, pk 32 bytes.
+///   - rx < p, s < n, px < p.
+///   - px is liftable (curve point exists with even y).
+///   - e is computed from BIP-340 tagged SHA-256 hash.
+///
+/// Tagged SHA-256 is deliberately NOT proven in this circuit.
+/// The circuit proves the algebraic BIP-340 relation given a
+/// public challenge value e.  The binding between e and the
+/// message / public key is established by the verifier's own
+/// hash computation outside the proof system.
 template <class LogicCircuit, class Field, class EC>
 class Bip340Verify {
   using EltW = typename LogicCircuit::EltW;
