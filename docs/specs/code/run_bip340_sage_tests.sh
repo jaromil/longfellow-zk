@@ -10,30 +10,40 @@ cd "$SCRIPT_DIR"
 export PYTHONPATH="$SCRIPT_DIR"
 
 # Find a Python that can import sage.all.
-SAGE_PYTHON=""
-for cand in python3 sage; do
+SAGE_PYTHON_CMD=()
+SAGE_PYTHON_LABEL=""
+
+try_sage_python() {
+  if "$@" -c "import sage.all" 2>/dev/null; then
+    SAGE_PYTHON_CMD=("$@")
+    SAGE_PYTHON_LABEL="$*"
+    return 0
+  fi
+  return 1
+}
+
+for cand in python3 /home/jrml/miniforge3/bin/python; do
   if command -v "$cand" &>/dev/null; then
-    if "$cand" -c "import sage.all" 2>/dev/null; then
-      SAGE_PYTHON="$cand"
+    if try_sage_python "$cand"; then
       break
     fi
   fi
 done
 
-if [ -z "$SAGE_PYTHON" ]; then
+if [ "${#SAGE_PYTHON_CMD[@]}" -eq 0 ] && command -v sage &>/dev/null; then
+  try_sage_python sage -python || true
+fi
+
+if [ "${#SAGE_PYTHON_CMD[@]}" -eq 0 ]; then
   echo "ERROR: No Python with 'sage.all' found." >&2
   echo "Try: /home/jrml/miniforge3/bin/python or install SageMath." >&2
   exit 1
 fi
 
-echo "Using Sage Python: $(command -v "$SAGE_PYTHON")"
+echo "Using Sage Python: $SAGE_PYTHON_LABEL"
 
-echo "=== Sage BIP-340 reference tests ==="
-"$SAGE_PYTHON" -m pytest tests/test_bip340.py -v --tb=short
-
-echo ""
-echo "=== Sage BIP-340 circuit parity tests ==="
-"$SAGE_PYTHON" -m pytest tests/test_bip340_circuit.py -v --tb=short
+echo "=== Sage BIP-340 tests ==="
+"${SAGE_PYTHON_CMD[@]}" -m unittest discover -s tests -p 'test_bip340*.py' -v
 
 echo ""
 echo "=== All Sage BIP-340 tests complete ==="
