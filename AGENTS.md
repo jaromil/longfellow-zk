@@ -150,7 +150,7 @@ sudo apt install -y build-essential clang cmake libssl-dev libzstd-dev libgtest-
 
 ## Current State (2026-07-04)
 
-- **301/301 CTest tests pass** on `bip340-production`.
+- **302/302 CTest tests pass** on `bip340-final-hardening`.
 - **Native secp256k1 ZK proof tests are wired to CTest:**
   - `lib/circuits/tests/ec/pk_circuit_test.cc` — typed tests for P256 + P256K1,
     including `ZkProverVerifier` using the CRT backend.
@@ -310,7 +310,7 @@ in `lib/circuits/bip340/`.  The circuit proves:
 wires=26,802, quad_terms=41,443, depth=9, block_enc≈43,745, padding=65,536
 
 **Tests:** 22 BIP-340 CTest tests (eval, vectors, ZK prover/verifier,
-soundness, mutation, guard, params, scale, fixture).  301/301 full CTest passes.
+soundness, mutation, guard, params, scale, fixture).  302/302 full CTest passes.
 
 ### Backend
 
