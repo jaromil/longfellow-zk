@@ -55,6 +55,33 @@ void PushBip340PublicInputs(DenseFiller<Field>& filler, const Field& F,
   filler.push_back(e);
 }
 
+/// Centralized eval-witness builder: fills a VerifyC::Witness from a
+/// Bip340Witness using a LogicType to create konst wires.  This is the
+/// single place where eval witness fields are copied; all eval tests
+/// use this helper (except tests that intentionally mutate fields).
+template <class LogicType, class VerifyC>
+typename VerifyC::Witness MakeEvalWitness(const LogicType& l,
+                                          const Bip340Witness& wit) {
+  typename VerifyC::Witness w;
+  for (size_t i = 0; i < Bip340Witness::kBits; ++i) {
+    w.bits_s[i] = l.konst(wit.bits_s_[i]);
+    w.bits_e[i] = l.konst(wit.bits_e_[i]);
+    w.bits_ry[i] = l.konst(wit.bits_ry_[i]);
+    if (i < Bip340Witness::kBits - 1) {
+      w.int_sx[i] = l.konst(wit.int_sx_[i]);
+      w.int_sy[i] = l.konst(wit.int_sy_[i]);
+      w.int_sz[i] = l.konst(wit.int_sz_[i]);
+      w.int_ex[i] = l.konst(wit.int_ex_[i]);
+      w.int_ey[i] = l.konst(wit.int_ey_[i]);
+      w.int_ez[i] = l.konst(wit.int_ez_[i]);
+    }
+  }
+  w.py = l.konst(wit.py_);
+  w.ry = l.konst(wit.ry_);
+  w.rz_inv = l.konst(wit.rz_inv_);
+  return w;
+}
+
 class Bip340EvalTest : public ::testing::Test {
  protected:
   using EvalBackend = EvaluationBackend<Field>;
@@ -81,20 +108,7 @@ class Bip340EvalTest : public ::testing::Test {
     EltW pxx = l.konst(px);
     EltW ee = l.konst(wit.e_);
 
-    typename VerifyC::Witness w;
-    for (size_t i = 0; i < 256; ++i) {
-      w.bits_s[i] = l.konst(wit.bits_s_[i]);
-      w.bits_e[i] = l.konst(wit.bits_e_[i]);
-      if (i < 255) {
-        w.int_sx[i] = l.konst(wit.int_sx_[i]);
-        w.int_sy[i] = l.konst(wit.int_sy_[i]);
-        w.int_sz[i] = l.konst(wit.int_sz_[i]);
-        w.int_ex[i] = l.konst(wit.int_ex_[i]);
-        w.int_ey[i] = l.konst(wit.int_ey_[i]);
-        w.int_ez[i] = l.konst(wit.int_ez_[i]);
-      }
-    }
-    w.py = l.konst(wit.py_);
+    typename VerifyC::Witness w = MakeEvalWitness<LogicType, VerifyC>(l, wit);
 
     circuit.assert_verify(rxx, pxx, ee, w);
 
@@ -144,10 +158,10 @@ class Bip340EvalTest : public ::testing::Test {
 };
 
 TEST_F(Bip340EvalTest, ValidWitness) {
-  // Pick known scalars and verify.
-  Nat s_nat(123456789ull);
-  Nat e_nat(987654321ull);
-  Nat sk_nat(3ull);
+  // Pick scalars that produce even R.y (verified via Sage).
+  Nat s_nat(2ull);
+  Nat e_nat(1ull);
+  Nat sk_nat(1ull);
 
   // Compute P = sk * G.
   auto G = ec.generator();
@@ -162,8 +176,8 @@ TEST_F(Bip340EvalTest, ValidWitness) {
 }
 
 TEST_F(Bip340EvalTest, WrongPublicKeyFails) {
-  Nat s_nat(123456789ull);
-  Nat e_nat(987654321ull);
+  Nat s_nat(2ull);
+  Nat e_nat(1ull);
 
   // Use wrong public key (different sk).
   auto G = ec.generator();
@@ -181,8 +195,8 @@ TEST_F(Bip340EvalTest, WrongPublicKeyFails) {
 }
 
 TEST_F(Bip340EvalTest, WrongRXFails) {
-  Nat s_nat(123456789ull);
-  Nat e_nat(987654321ull);
+  Nat s_nat(2ull);
+  Nat e_nat(1ull);
 
   auto G = ec.generator();
   auto P = ec.scalar_multf(G, Nat(3ull));
@@ -197,9 +211,9 @@ TEST_F(Bip340EvalTest, WrongRXFails) {
 }
 
 TEST_F(Bip340EvalTest, WrongChallengeFails) {
-  Nat s_nat(123456789ull);
-  Nat e_nat(987654321ull);
-  Nat e_wrong_nat(987654322ull);  // off by 1
+  Nat s_nat(2ull);
+  Nat e_nat(1ull);
+  Nat e_wrong_nat(2ull);  // off by 1
 
   auto G = ec.generator();
   auto P = ec.scalar_multf(G, Nat(3ull));
@@ -221,20 +235,7 @@ TEST_F(Bip340EvalTest, WrongChallengeFails) {
   EltW pxx = l.konst(P.x);
   EltW ee = l.konst(F.to_montgomery(e_wrong_nat));  // wrong!
 
-  typename VerifyC::Witness w;
-  for (size_t i = 0; i < 256; ++i) {
-    w.bits_s[i] = l.konst(wit.bits_s_[i]);
-    w.bits_e[i] = l.konst(wit.bits_e_[i]);
-    if (i < 255) {
-      w.int_sx[i] = l.konst(wit.int_sx_[i]);
-      w.int_sy[i] = l.konst(wit.int_sy_[i]);
-      w.int_sz[i] = l.konst(wit.int_sz_[i]);
-      w.int_ex[i] = l.konst(wit.int_ex_[i]);
-      w.int_ey[i] = l.konst(wit.int_ey_[i]);
-      w.int_ez[i] = l.konst(wit.int_ez_[i]);
-    }
-  }
-  w.py = l.konst(wit.py_);
+  typename VerifyC::Witness w = MakeEvalWitness<LogicType, VerifyC>(l, wit);
 
   circuit.assert_verify(rxx, pxx, ee, w);
   ASSERT_TRUE(ebk.assertion_failed());
@@ -429,20 +430,7 @@ TEST(Bip340RealVectorTest, EvalTestVectors) {
           Bip340Witness::nat_from_be_bytes(pk.data())));
       EltW e = l.konst(wit.e_);
 
-      typename VerifyC::Witness w;
-      for (size_t i = 0; i < 256; ++i) {
-        w.bits_s[i] = l.konst(wit.bits_s_[i]);
-        w.bits_e[i] = l.konst(wit.bits_e_[i]);
-        if (i < 255) {
-          w.int_sx[i] = l.konst(wit.int_sx_[i]);
-          w.int_sy[i] = l.konst(wit.int_sy_[i]);
-          w.int_sz[i] = l.konst(wit.int_sz_[i]);
-          w.int_ex[i] = l.konst(wit.int_ex_[i]);
-          w.int_ey[i] = l.konst(wit.int_ey_[i]);
-          w.int_ez[i] = l.konst(wit.int_ez_[i]);
-        }
-      }
-      w.py = l.konst(wit.py_);
+      typename VerifyC::Witness w = MakeEvalWitness<LogicType, VerifyC>(l, wit);
 
       circuit.assert_verify(rx, px, e, w);
       ASSERT_FALSE(ebk.assertion_failed())
@@ -469,20 +457,7 @@ TEST(Bip340RealVectorTest, EvalTestVectors) {
           Bip340Witness::nat_from_be_bytes(pk.data())));
       EltW e = l.konst(wit.e_);
 
-      typename VerifyC::Witness w;
-      for (size_t i = 0; i < 256; ++i) {
-        w.bits_s[i] = l.konst(wit.bits_s_[i]);
-        w.bits_e[i] = l.konst(wit.bits_e_[i]);
-        if (i < 255) {
-          w.int_sx[i] = l.konst(wit.int_sx_[i]);
-          w.int_sy[i] = l.konst(wit.int_sy_[i]);
-          w.int_sz[i] = l.konst(wit.int_sz_[i]);
-          w.int_ex[i] = l.konst(wit.int_ex_[i]);
-          w.int_ey[i] = l.konst(wit.int_ey_[i]);
-          w.int_ez[i] = l.konst(wit.int_ez_[i]);
-        }
-      }
-      w.py = l.konst(wit.py_);
+      typename VerifyC::Witness w = MakeEvalWitness<LogicType, VerifyC>(l, wit);
 
       circuit.assert_verify(rx, px, e, w);
       ASSERT_TRUE(ebk.assertion_failed())
@@ -605,9 +580,9 @@ struct Bip340TestData {
   Elt rx;
 };
 
-inline Bip340TestData MakeTestData(Nat s_nat = Nat(123456789ull),
-                                   Nat e_nat = Nat(987654321ull),
-                                   Nat sk = Nat(3ull)) {
+inline Bip340TestData MakeTestData(Nat s_nat = Nat(2ull),
+                                   Nat e_nat = Nat(1ull),
+                                   Nat sk = Nat(1ull)) {
   const Field& F = p256k1_base;
   const EC& ec = p256k1;
   auto G = ec.generator();
@@ -708,9 +683,9 @@ class Bip340ZkTest : public ::testing::Test {
     log(INFO, "BIP-340 Verifier done");
   }
 
-  Bip340TestData setup_test_data(Nat s_nat = Nat(123456789ull),
-                                 Nat e_nat = Nat(987654321ull),
-                                 Nat sk = Nat(3ull)) {
+  Bip340TestData setup_test_data(Nat s_nat = Nat(2ull),
+                                 Nat e_nat = Nat(1ull),
+                                 Nat sk = Nat(1ull)) {
     return MakeTestData(s_nat, e_nat, sk);
   }
 };

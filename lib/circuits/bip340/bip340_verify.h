@@ -80,7 +80,10 @@ class Bip340Verify {
     EltW int_ey[kBits];
     EltW int_ez[kBits];
 
-    EltW py;
+    EltW py;          // affine P.y (the even square root)
+    EltW ry;          // affine R.y (witnessed even value)
+    EltW rz_inv;      // inverse of R.z (proves R finite)
+    EltW bits_ry[kBits];  // affine ry bits, MSB-first
 
     void input(const LogicCircuit& lc) {
       for (size_t i = 0; i < kBits; ++i) {
@@ -100,6 +103,11 @@ class Bip340Verify {
         }
       }
       py = lc.eltw_input();
+      ry = lc.eltw_input();
+      rz_inv = lc.eltw_input();
+      for (size_t i = 0; i < kBits; ++i) {
+        bits_ry[i] = lc.eltw_input();
+      }
     }
   };
 
@@ -148,11 +156,31 @@ class Bip340Verify {
     EltW rpx, rpy, rpz;
     addE(rpx, rpy, rpz, sgx, sgy, sgz, epx, neg_epy, epz);
 
-    // -- 5. Check R.x == rx (projective equality) -------------------------
-    // R.x / R.z == rx / 1  ⟺  R.x * 1 == rx * R.z
-    EltW lhs = rpx;                       // rpx * 1
-    EltW rhs = lc_.mul(rx, rpz);          // rx * rpz
-    lc_.assert_eq(lhs, rhs);
+    // -- 5. Verify R is on the curve and finite --------------------------
+    assert_point_on_curve(rx, w.ry);
+
+    // R.z * rz_inv = 1  ⟺  R is not the point at infinity.
+    lc_.assert_eq(lc_.mul(rpz, w.rz_inv), one);
+
+    // -- 6. Check R.x == rx (projective) ---------------------------------
+    lc_.assert_eq(rpx, lc_.mul(rx, rpz));   // R.x * 1 == rx * R.z
+
+    // -- 7. Check R.y == ry (projective) ---------------------------------
+    lc_.assert_eq(rpy, lc_.mul(w.ry, rpz));  // R.y * 1 == ry * R.z
+
+    // -- 8. Verify ry bitness and even parity ----------------------------
+    // bits_ry[0] is MSB, bits_ry[kBits-1] is LSB.
+    EltW ry_check = lc_.konst(lc_.zero());
+    for (size_t i = 0; i < kBits; ++i) {
+      typename LogicCircuit::BitW b_bit(w.bits_ry[i], lc_.f_);
+      lc_.assert_is_bit(b_bit);
+      ry_check = lc_.add(ry_check, ry_check);  // ry_check *= 2
+      ry_check = lc_.add(ry_check, w.bits_ry[i]);
+    }
+    lc_.assert_eq(ry_check, w.ry);
+
+    // Assert LSB is zero (bits_ry[255] in MSB-first order).
+    lc_.assert_eq(w.bits_ry[kBits - 1], zero);
   }
 
  private:
