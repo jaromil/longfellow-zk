@@ -293,14 +293,24 @@ The `.gestalt/plans/secp256k1-native-proving.org` plan follows a structured work
 
 ## BIP-340 / Schnorr Verification (2026-07-03)
 
-### Production Status
+### Production Status (2026-07-04)
 
-A vertical slice for BIP-340 Schnorr signature verification over native
-secp256k1 is in `lib/circuits/bip340/`.  **Currently the circuit passes all
-upstream Bitcoin Core test vectors, but the even-y check on R is performed
-only in honest witness generation — it is not yet proven in-circuit.**
-Production soundness requires proving canonical evenness of `R.y` inside
-circuit constraints.
+BIP-340 Schnorr verification with full production soundness is implemented
+in `lib/circuits/bip340/`.  The circuit proves:
+
+  - Point-on-curve for P and R.
+  - Double-and-add trace for s·G and e·P.
+  - R = s·G - e·P finite (R.z * rz_inv = 1).
+  - R.x == rx, R.y == ry (projective equality).
+  - ry reconstructed from 256 witness bits (MSB-first).
+  - Each ry bit ∈ {0,1} (256 bitness gates).
+  - LSB of ry = 0 (canonical evenness).
+
+**Circuit metrics (single BIP-340 verify):**
+wires=26,336, quad_terms=40,650, depth=8, block_enc≈42,955, padding=65,536
+
+**Tests:** 17 BIP-340 tests (eval, vectors, ZK prover/verifier, soundness,
+mutation, guard, params, scale).  295/295 full CTest passes.
 
 ### Backend
 
@@ -318,10 +328,7 @@ them; plain `python3` cannot import `sage.all`.
 | `bip340_verify.h` | Circuit: `s·G - e·P = R` with x-only keys, double-and-add |
 | `bip340_witness.h` | Witness generator: `compute_from_scalars()` for testing, `compute()` for real sigs |
 | `bip340_guard.h` | CRT capacity guard: rejects `block_enc` exceeding `2^22` FFT order |
-| `bip340_test.cc` | 12 tests: eval, circuit size, ZK prover/verifier, guard, scale |
-
-**Circuit metrics (single BIP-340 verify):**
-wires=25,544, quad_terms=39,599, depth=8, block_enc≈41,646, padding=65,536
+| `bip340_test.cc` | 17 tests: eval, vectors, ZK prover/verifier, soundness, mutation, guard, params, scale |
 
 **Proving backend:** Always use `CrtConvolutionFactory<CRT256<Fp256k1Base>, Fp256k1Base>`.
 The `bip340_guard.h` provides `check_crt_block_enc<CRT>()` to catch oversized
