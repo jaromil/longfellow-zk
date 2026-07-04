@@ -35,6 +35,7 @@ class TestBip340(unittest.TestCase):
         Gx, Gy = generator()
         pt = lift_x(Gx)
         self.assertIsNotNone(pt)
+        assert pt is not None  # type narrowing for mypy
         self.assertEqual(pt[0], Gx)
         self.assertEqual(pt[1], Gy)
         # Gy should be even.
@@ -110,7 +111,9 @@ class TestBip340(unittest.TestCase):
 
         E = _get_curve()
         G = _get_G()
-        P = E(*lift_x(_int_from_bytes(pk_bytes)))
+        pk_pt = lift_x(_int_from_bytes(pk_bytes))
+        assert pk_pt is not None
+        P = E(pk_pt[0], pk_pt[1])
 
         # s·G - e·P should equal R.
         R = int(s) * G - int(e) * P

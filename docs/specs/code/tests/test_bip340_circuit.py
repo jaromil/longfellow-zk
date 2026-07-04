@@ -16,7 +16,8 @@ Tests cover:
 import copy
 import unittest
 
-import sage.all
+import sage.all  # type: ignore[import-untyped]
+from sage.rings.finite_rings.element_base import FiniteRingElement
 
 from circuit import Circuit
 from fields import Fp256k1
@@ -40,7 +41,7 @@ from bip340_circuit import (
 
 class TestBip340Circuit(unittest.TestCase):
 
-    def setUp(self):
+    def setUp(self) -> None:
         """Valid BIP-340 test vector 0."""
         self.tv0 = {
             "pk": bytes.fromhex(
@@ -139,7 +140,7 @@ class TestBip340Circuit(unittest.TestCase):
         pad_transcript = Transcript()
         pad_transcript.init(b"bip340 pad prng")
 
-        def pad_prg(field):
+        def pad_prg(field: Fp256k1) -> FiniteRingElement:
             return pad_transcript.generate_field(field)
 
         (pad_layers, _pad_flattened) = construct_concrete_pad(

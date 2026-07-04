@@ -7,7 +7,7 @@ arithmetic with hashlib for SHA-256.
 """
 
 import hashlib
-from typing import Optional, Tuple
+from typing import Any, Optional, Tuple, TypedDict
 
 import sage.all  # type: ignore[import-untyped]
 
@@ -26,7 +26,7 @@ _curve = None  # type: ignore[var-annotated]
 _generator = None  # type: ignore[var-annotated]
 
 
-def _get_curve():
+def _get_curve() -> Any:
     """Return the secp256k1 elliptic curve (Sage object)."""
     global _curve
     if _curve is None:
@@ -35,7 +35,7 @@ def _get_curve():
     return _curve
 
 
-def _get_G():
+def _get_G() -> Any:
     """Return the secp256k1 generator point (Sage object)."""
     global _generator
     if _generator is None:
@@ -135,7 +135,14 @@ def verify(pk_bytes: bytes, msg: bytes, sig_bytes: bytes) -> bool:
     return Rx == r
 
 
-def _load_test_vectors() -> list:
+class _TestVector(TypedDict):
+    pk: bytes
+    msg: bytes
+    sig: bytes
+    valid: bool
+
+
+def _load_test_vectors() -> list[_TestVector]:
     """Load BIP-340 test vectors from the shared CSV fixture.
 
     Returns a list of dicts with keys: pk, msg, sig, valid.
@@ -153,7 +160,7 @@ def _load_test_vectors() -> list:
         raise FileNotFoundError("bip340_test_vectors.csv not found at " +
                                 csv_path)
 
-    vectors = []
+    vectors: list[_TestVector] = []
     with open(csv_path, newline='', encoding='ascii') as f:
         reader = csv.DictReader(f)
         for row in reader:
