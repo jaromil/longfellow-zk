@@ -31,16 +31,17 @@ VECTORS_INC_PATH = TESTDATA_DIR / "bip340_vectors.inc"
 GOLDEN_INC_PATH = TESTDATA_DIR / "bip340_golden.inc"
 
 
+# Exact Bitcoin Core CSV headers.  Regeneration fails if upstream changes.
+EXPECTED_HEADERS = [
+    "index", "secret key", "public key", "aux_rand", "message",
+    "signature", "verification result", "comment",
+]
+
+
 def cell(row: dict[str, str], name: str) -> str:
-    """Read a CSV field, accepting Bitcoin Core names and old local names."""
-    aliases = {
-        "secret_key": ("secret_key", "secret key"),
-        "public_key": ("public_key", "public key"),
-        "verification_result": ("verification_result", "verification result"),
-    }
-    for key in aliases.get(name, (name,)):
-        if key in row:
-            return row[key]
+    """Read a CSV field by Bitcoin Core column name."""
+    if name in row:
+        return row[name]
     raise KeyError(f"missing CSV column {name!r}; got {sorted(row)}")
 
 
@@ -54,7 +55,15 @@ def cxx_string(value: str) -> str:
 
 def load_rows() -> list[dict[str, str]]:
     with CSV_PATH.open(newline="", encoding="ascii") as f:
-        rows = list(csv.DictReader(f))
+        reader = csv.DictReader(f)
+        actual = reader.fieldnames
+        if actual is None or list(actual) != EXPECTED_HEADERS:
+            raise ValueError(
+                f"CSV headers changed.\n"
+                f"  expected: {EXPECTED_HEADERS}\n"
+                f"  got:      {actual}"
+            )
+        rows = list(reader)
     if len(rows) != 19:
         raise ValueError(f"expected 19 BIP-340 vectors, got {len(rows)}")
     return rows
@@ -74,7 +83,7 @@ def write_vectors_inc(rows: list[dict[str, str]]) -> None:
         for i, row in enumerate(rows):
             valid = (
                 "true"
-                if cell(row, "verification_result").upper() == "TRUE"
+                if cell(row, "verification result").upper() == "TRUE"
                 else "false"
             )
             comment = cell(row, "comment")
@@ -83,7 +92,7 @@ def write_vectors_inc(rows: list[dict[str, str]]) -> None:
             else:
                 f.write(f"    // {i}\n")
             f.write("    {")
-            f.write(f'{cxx_string(cell(row, "public_key"))},\n')
+            f.write(f'{cxx_string(cell(row, "public key"))},\n')
             f.write(f'     {cxx_string(cell(row, "message"))},\n')
             f.write(f'     {cxx_string(cell(row, "signature"))}, {valid}}},\n')
 
