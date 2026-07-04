@@ -91,7 +91,8 @@ class Bip340Witness {
   /// msg:        message bytes
   /// msg_len:    length of message in bytes
   ///
-  /// Returns true on success.
+  /// Returns true on success, false if inputs are invalid per BIP-340
+  /// (r >= p, s >= n, pk x >= p, pk not on the curve).
   bool compute(const uint8_t sig_bytes[64], const uint8_t pk_bytes[32],
                const uint8_t* msg, size_t msg_len) {
     const Field& F = ec_.f_;
@@ -103,6 +104,14 @@ class Bip340Witness {
     Nat s_nat  = nat_from_be_bytes(sig_bytes + 32);
     Nat px_nat = nat_from_be_bytes(pk_bytes);
 
+    // -- Validate r < p, s < n, px < p  (BIP-340 requirements) ----------
+    Nat p_order(
+        "0xfffffffffffffffffffffffffffffffffffffffffffffffffffffffefffffc2f");
+    Nat n_order = scalar_order_nat();
+    if (!(rx_nat < p_order)) return false;
+    if (!(s_nat < n_order)) return false;
+    if (!(px_nat < p_order)) return false;
+
     // Convert to Montgomery form.
     Elt px = F.to_montgomery(px_nat);
 
@@ -112,6 +121,9 @@ class Bip340Witness {
     Elt y2 = F.addf(x3, ec_.b_);  // b = 7
     py_ = sqrt_even(y2, F);
 
+    // Verify py² == y2 (pk is on the curve).
+    if (F.mulf(py_, py_) != y2) return false;
+
     // -- Compute challenge e = tagged_hash("BIP0340/challenge",
     //    R.x || P.x || msg) mod n ---------------------------------------
     uint8_t hash[32];
@@ -119,7 +131,6 @@ class Bip340Witness {
     Nat e_nat = nat_from_be_bytes(hash);
 
     // Reduce mod n if needed.
-    Nat n_order = scalar_order_nat();
     if (!(e_nat < n_order)) {
       e_nat.sub(n_order);
     }
