@@ -309,8 +309,8 @@ in `lib/circuits/bip340/`.  The circuit proves:
 **Circuit metrics (single BIP-340 verify):**
 wires=26,802, quad_terms=41,443, depth=9, block_enc≈43,745, padding=65,536
 
-**Tests:** 21 BIP-340 CTest tests (eval, vectors, ZK prover/verifier,
-soundness, mutation, guard, params, scale).  301/301 full CTest passes.
+**Tests:** 22 BIP-340 CTest tests (eval, vectors, ZK prover/verifier,
+soundness, mutation, guard, params, scale, fixture).  301/301 full CTest passes.
 
 ### Backend
 
@@ -343,7 +343,7 @@ python3 docs/specs/code/generate_bip340_vectors_inc.py --refresh-bitcoin-core
 | `bip340_verify.h` | Circuit: `s·G - e·P = R` with x-only keys, double-and-add |
 | `bip340_witness.h` | Witness generator: `compute_from_scalars()` for testing, `compute()` for real sigs |
 | `bip340_guard.h` | CRT capacity guard: rejects `block_enc` exceeding `2^22` FFT order |
-| `bip340_test.cc` | 21 tests: eval, vectors, ZK prover/verifier, soundness, mutation, guard, params, scale |
+| `bip340_test.cc` | 22 tests: eval, vectors, ZK prover/verifier, soundness, mutation, guard, params, scale, fixture |
 
 **Proving backend:** Always use `CrtConvolutionFactory<CRT256<Fp256k1Base>, Fp256k1Base>`.
 The `bip340_guard.h` provides `check_crt_block_enc<CRT>()` to catch oversized
