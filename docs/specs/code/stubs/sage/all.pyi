@@ -2,7 +2,7 @@ from typing import Any
 
 from sage.rings.finite_rings.element_base import FiniteRingElement
 from sage.rings.finite_rings.finite_field_base import FiniteField
-from sage.rings.finite_rings.finite_field_constructor import GF
+from sage.rings.finite_rings.finite_field_constructor import GF as GF
 
 
 class EllipticCurvePoint:

@@ -18,6 +18,7 @@ import unittest
 
 import sage.all  # type: ignore[import-untyped]
 from sage.rings.finite_rings.element_base import FiniteRingElement
+from sage.rings.finite_rings.finite_field_base import FiniteField
 
 from circuit import Circuit
 from fields import Fp256k1
@@ -140,7 +141,7 @@ class TestBip340Circuit(unittest.TestCase):
         pad_transcript = Transcript()
         pad_transcript.init(b"bip340 pad prng")
 
-        def pad_prg(field: Fp256k1) -> FiniteRingElement:
+        def pad_prg(field: FiniteField) -> FiniteRingElement:
             return pad_transcript.generate_field(field)
 
         (pad_layers, _pad_flattened) = construct_concrete_pad(
