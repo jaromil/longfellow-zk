@@ -25,6 +25,7 @@
 #include "random/secure_random_engine.h"
 #include "random/transcript.h"
 #include "util/log.h"
+#include "util/readbuffer.h"
 #include "zk/zk_proof.h"
 #include "zk/zk_prover.h"
 #include "zk/zk_verifier.h"
@@ -424,6 +425,15 @@ TEST(Bip340RealVectorTest, ZkProverVerifier_Vector0) {
   circuit.assert_verify(rx, px, e, w);
   auto CIRCUIT = Q.mkcircuit(1);
 
+  // CRT guard: ensure block_enc fits within 2^22 FFT order.
+  {
+    using Crt = CRT256<Field>;
+    size_t block_enc = CIRCUIT->ninputs - CIRCUIT->npub_in +
+                       Q.nquad_terms_ + 1;
+    auto err = check_crt_block_enc<Crt>(block_enc);
+    ASSERT_TRUE(err.empty()) << "CRT capacity: " << err;
+  }
+
   auto W = std::make_unique<Dense<Field>>(1, CIRCUIT->ninputs);
   {
     DenseFiller<Field> filler(*W);
@@ -716,7 +726,7 @@ class Bip340ZkTest : public ::testing::Test {
   const Field& F = p256k1_base;
   const EC& ec = p256k1;
 
-  std::unique_ptr<Circuit<Field>> make_circuit() {
+  std::pair<std::unique_ptr<Circuit<Field>>, size_t> make_circuit_with_quads() {
     QuadCircuit<Field> Q(F);
     const CompilerBackendType cbk(&Q);
     const LogicCircuit lc(&cbk, F);
@@ -731,7 +741,7 @@ class Bip340ZkTest : public ::testing::Test {
     w.input(lc);
 
     circuit.assert_verify(rx, px, e, w);
-    return Q.mkcircuit(1);
+    return {Q.mkcircuit(1), Q.nquad_terms_};
   }
 
   void run_zk_test(const Nat& s_nat, const Nat& e_nat,
@@ -739,7 +749,16 @@ class Bip340ZkTest : public ::testing::Test {
     Bip340Witness wit(ec);
     ASSERT_TRUE(wit.compute_from_scalars(s_nat, e_nat, px, py));
 
-    auto circuit = make_circuit();
+    auto [circuit, nquad] = make_circuit_with_quads();
+
+    // CRT guard: ensure block_enc fits within 2^22 FFT order.
+    {
+      using Crt = CRT256<Field>;
+      size_t block_enc = circuit->ninputs - circuit->npub_in + nquad + 1;
+      auto err = check_crt_block_enc<Crt>(block_enc);
+      ASSERT_TRUE(err.empty()) << "CRT capacity: " << err;
+    }
+
     auto W = std::make_unique<Dense<Field>>(1, circuit->ninputs);
 
     // Fill prover witness.
@@ -799,7 +818,7 @@ TEST_F(Bip340ZkTest, WrongPublicInputFails) {
   Bip340Witness wit(ec);
   ASSERT_TRUE(wit.compute_from_scalars(d.s_nat, d.e_nat, d.px, d.py));
 
-  auto circuit = make_circuit();
+  auto circuit = make_circuit_with_quads().first;
   auto W = std::make_unique<Dense<Field>>(1, circuit->ninputs);
   {
     DenseFiller<Field> filler(*W);
@@ -841,6 +860,172 @@ TEST_F(Bip340ZkTest, LargerScalars) {
   Nat e_nat("0x1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2c");
   auto d = setup_test_data(s_nat, e_nat);
   run_zk_test(d.s_nat, d.e_nat, d.px, d.py, d.rx);
+}
+
+// ===================== CRT Parameter Guard ==============================
+
+// ===================== Randomized Test ==================================
+
+TEST(Bip340RandomizedTest, DeterministicSmallScalarCases) {
+  using EvalBackend = EvaluationBackend<Field>;
+  using LogicType = Logic<Field, EvalBackend>;
+  using VerifyC = Bip340Verify<LogicType, Field, EC>;
+
+  const Field& F = p256k1_base;
+  const EC& ec = p256k1;
+  constexpr size_t kNumCases = 32;
+
+  // Deterministic seed: small consecutive values, not randomness.
+  size_t collected = 0;
+  for (uint64_t sk = 1; sk < 300 && collected < kNumCases; ++sk) {
+    for (uint64_t s = 1; s < 300 && collected < kNumCases; ++s) {
+      for (uint64_t e = 1; e < 20 && collected < kNumCases; ++e) {
+        Nat sk_nat(sk), s_nat(s), e_nat(e);
+        auto G = ec.generator();
+        auto P = ec.scalar_multf(G, sk_nat);
+        ec.normalize(P);
+
+        // Pick even py.
+        Nat exp_n("0x3fffffffffffffffffffffffffffffffffffffffffffffffffffffffbfffff0c");
+        Elt x2 = F.mulf(P.x, P.x);
+        Elt x3 = F.mulf(x2, P.x);
+        Elt y2 = F.addf(x3, ec.b_);
+        Elt py = F.one(), base = y2;
+        for (int i = 255; i >= 0; --i) { py = F.mulf(py, py); if (exp_n.bit(i)) py = F.mulf(py, base); }
+        if (F.from_montgomery(py).bit(0) != 0) py = F.negf(py);
+        if (F.mulf(py, py) != y2) continue;  // P.x not liftable
+
+        // Compute R from the witness's own intermediates (same algorithm
+        // as the circuit's double-and-add, so projective coords match).
+        Bip340Witness wit(ec);
+        ASSERT_TRUE(wit.compute_from_scalars(s_nat, e_nat, P.x, py));
+
+        // Extract final sG and eP from witness intermediates.
+        typename EC::ECPoint sG_pt = {
+            wit.int_sx_[Bip340Witness::kBits - 1],
+            wit.int_sy_[Bip340Witness::kBits - 1],
+            wit.int_sz_[Bip340Witness::kBits - 1]};
+        typename EC::ECPoint eP_pt = {
+            wit.int_ex_[Bip340Witness::kBits - 1],
+            wit.int_ey_[Bip340Witness::kBits - 1],
+            wit.int_ez_[Bip340Witness::kBits - 1]};
+
+        // R = sG - eP.
+        auto neg_ep = typename EC::ECPoint{eP_pt.x, F.negf(eP_pt.y), eP_pt.z};
+        ec.addE(sG_pt, neg_ep);
+        ec.normalize(sG_pt);
+
+        // Skip cases with odd R.y.
+        if (F.from_montgomery(sG_pt.y).bit(0) != 0) continue;
+        Elt rx = sG_pt.x;
+
+        const EvalBackend ebk(F, true);
+        const LogicType l(&ebk, F);
+        VerifyC circuit(l, ec);
+        auto w = MakeEvalWitness<LogicType, VerifyC>(l, wit);
+        circuit.assert_verify(l.konst(rx), l.konst(P.x), l.konst(wit.e_), w);
+        ASSERT_FALSE(ebk.assertion_failed())
+            << "sk=" << sk << " s=" << s << " e=" << e;
+        ++collected;
+      }
+    }
+  }
+  log(INFO, "Randomized test: %zu even-R cases collected", collected);
+  EXPECT_GE(collected, kNumCases);
+}
+
+// ===================== Proof Tamper Test =================================
+
+TEST(Bip340TamperTest, TamperedProofFailsVerification) {
+  set_log_level(INFO);
+  const Field& F = p256k1_base;
+  const EC& ec = p256k1;
+
+  const auto& tv = kRealVectors[0];
+  auto pk = hex_vec(tv.pk_hex);
+  auto msg = hex_vec(tv.msg_hex);
+  auto sig = hex_vec(tv.sig_hex);
+
+  Bip340Witness wit(ec);
+  ASSERT_TRUE(wit.compute(sig.data(), pk.data(), msg.data(), msg.size()));
+
+  using CompilerBackendType = CompilerBackend<Field>;
+  using LogicCircuit = Logic<Field, CompilerBackendType>;
+  using VerifyCC = Bip340Verify<LogicCircuit, Field, EC>;
+
+  QuadCircuit<Field> Q(F);
+  const CompilerBackendType cbk(&Q);
+  const LogicCircuit lc(&cbk, F);
+  VerifyCC circuit(lc, ec);
+
+  auto rxx = lc.eltw_input();
+  auto pxx = lc.eltw_input();
+  auto ee = lc.eltw_input();
+  Q.private_input();
+  typename VerifyCC::Witness w;
+  w.input(lc);
+  circuit.assert_verify(rxx, pxx, ee, w);
+  auto CIRCUIT = Q.mkcircuit(1);
+
+  // CRT guard.
+  {
+    using Crt = CRT256<Field>;
+    size_t block_enc = CIRCUIT->ninputs - CIRCUIT->npub_in +
+                       Q.nquad_terms_ + 1;
+    auto err = check_crt_block_enc<Crt>(block_enc);
+    ASSERT_TRUE(err.empty()) << "CRT capacity: " << err;
+  }
+
+  auto W = std::make_unique<Dense<Field>>(1, CIRCUIT->ninputs);
+  {
+    DenseFiller<Field> filler(*W);
+    PushBip340PublicInputs(filler, F,
+        F.to_montgomery(Bip340Witness::nat_from_be_bytes(sig.data())),
+        F.to_montgomery(Bip340Witness::nat_from_be_bytes(pk.data())),
+        wit.e_);
+    wit.fill_witness(filler);
+  }
+
+  using Crt = CRT256<Field>;
+  using ConvolutionFactory = CrtConvolutionFactory<Crt, Field>;
+  using RSFactory = ReedSolomonFactory<Field, ConvolutionFactory>;
+
+  ConvolutionFactory factory(F);
+  RSFactory rsf(factory, F);
+
+  Transcript tp((uint8_t*)"bip340 tamper", 13);
+  SecureRandomEngine rng;
+
+  ZkProof<Field> zkpr(*CIRCUIT, kRate, kQueries);
+  ZkProver<Field, RSFactory> prover(*CIRCUIT, F, rsf);
+  prover.commit(zkpr, *W, tp, rng);
+  prover.prove(zkpr, *W, tp);
+
+  // Serialize to bytes, corrupt one byte, read back.
+  std::vector<uint8_t> buf;
+  zkpr.write(buf, F);
+  ASSERT_GE(buf.size(), 20u) << "Proof too small to tamper";
+  buf[10] ^= 0xFF;  // flip all bits of byte 10
+
+  ReadBuffer rbuf(buf);
+  ZkProof<Field> zkpr_tampered(*CIRCUIT, kRate, kQueries);
+  ASSERT_TRUE(zkpr_tampered.read(rbuf, F)) << "Failed to read tampered proof";
+
+  // Verification with tampered proof must fail.
+  Transcript tv2((uint8_t*)"bip340 tamper", 13);
+  auto pub = Dense<Field>(1, CIRCUIT->npub_in);
+  {
+    DenseFiller<Field> filler(pub);
+    PushBip340PublicInputs(filler, F,
+        F.to_montgomery(Bip340Witness::nat_from_be_bytes(sig.data())),
+        F.to_montgomery(Bip340Witness::nat_from_be_bytes(pk.data())),
+        wit.e_);
+  }
+
+  ZkVerifier<Field, RSFactory> verifier(*CIRCUIT, rsf, kRate, kQueries, F);
+  verifier.recv_commitment(zkpr_tampered, tv2);
+  EXPECT_FALSE(verifier.verify(zkpr_tampered, pub, tv2))
+      << "Tampered proof should fail verification";
 }
 
 // ===================== CRT Parameter Guard ==============================
