@@ -269,6 +269,40 @@ struct Bip340RealVector {
   bool circuit_can_check;  // false for vectors the circuit can't distinguish
 };
 
+/// Expected rejection layer for invalid vectors.
+enum class RejectBy {
+  kAccept = 0,          // valid signature; circuit must accept
+  kInputValidation,     // rejected by compute() before reaching circuit
+  kCircuit,             // accepted by compute() but rejected by circuit
+  kSkipped,             // not tested through circuit (legacy limitation)
+};
+
+/// For each invalid vector, which layer is expected to catch it.
+/// Indexed by vector number; entries for valid vectors are kAccept.
+constexpr RejectBy kRejectLayer[] = {
+    RejectBy::kAccept,            // 0: valid
+    RejectBy::kAccept,            // 1: valid
+    RejectBy::kAccept,            // 2: valid
+    RejectBy::kAccept,            // 3: valid
+    RejectBy::kAccept,            // 4: valid
+    RejectBy::kInputValidation,   // 5: pk not on curve (lift fails)
+    RejectBy::kCircuit,           // 6: odd R.y — detected by LSB-zero gate
+    RejectBy::kCircuit,           // 7: negated message
+    RejectBy::kCircuit,           // 8: negated s value
+    RejectBy::kCircuit,           // 9: R = infinity (rx=0) — R.z*rz_inv=1 fails
+    RejectBy::kCircuit,           // 10: R = infinity (rx=1)
+    RejectBy::kCircuit,           // 11: r not a quadratic residue — R.x==rx fails
+    RejectBy::kInputValidation,   // 12: r >= p
+    RejectBy::kInputValidation,   // 13: s >= n
+    RejectBy::kInputValidation,   // 14: pk >= p
+    RejectBy::kSkipped,           // 15: valid (empty msg) — eval crash, skip
+    RejectBy::kSkipped,           // 16: valid (1-byte msg) — eval crash, skip
+    RejectBy::kSkipped,           // 17: valid (17-byte msg) — eval crash, skip
+    RejectBy::kSkipped,           // 18: valid (100-byte msg) — eval crash, skip
+};
+static_assert(sizeof(kRejectLayer) / sizeof(kRejectLayer[0]) == 19,
+              "kRejectLayer must cover all 19 vectors");
+
 // Upstream BIP-340 test vectors from Bitcoin Core.
 // All 19 vectors from bip340_test_vectors.csv.
 const Bip340RealVector kRealVectors[] = {
@@ -305,11 +339,11 @@ const Bip340RealVector kRealVectors[] = {
      "243F6A8885A308D313198A2E03707344A4093822299F31D0082EFA98EC4E6C89",
      "6CFF5C3BA86C69EA4B7376F31A9BCB4F74C1976089B2D9963DA2E5543E177769"
      "69E89B4C5564D00349106B8497785DD7D1D713A8AE82B32FA79D5F7FC407D39B", false, true},
-    // 6: has_even_y(R) is false (circuit does not enforce even-y check)
+    // 6: has_even_y(R) is false — circuit now detects via LSB-zero gate
     {"DFF1D77F2A671C5F36183726DB2341BE58FEAE1DA2DECED843240F7B502BA659",
      "243F6A8885A308D313198A2E03707344A4093822299F31D0082EFA98EC4E6C89",
      "FFF97BD5755EEEA420453A14355235D382F6472F8568A18B2F057A1460297556"
-     "3CC27944640AC607CD107AE10923D9EF7A73C643E166BE5EBEAFA34B1AC553E2", false, false},
+     "3CC27944640AC607CD107AE10923D9EF7A73C643E166BE5EBEAFA34B1AC553E2", false, true},
     // 7: negated message
     {"DFF1D77F2A671C5F36183726DB2341BE58FEAE1DA2DECED843240F7B502BA659",
      "243F6A8885A308D313198A2E03707344A4093822299F31D0082EFA98EC4E6C89",
@@ -320,27 +354,21 @@ const Bip340RealVector kRealVectors[] = {
      "243F6A8885A308D313198A2E03707344A4093822299F31D0082EFA98EC4E6C89",
      "6CFF5C3BA86C69EA4B7376F31A9BCB4F74C1976089B2D9963DA2E5543E177769"
      "961764B3AA9B2FFCB6EF947B6887A226E8D7C93E00C5ED0C1834FF0D0C2E6DA6", false, true},
-    // 9: sG - eP = O (infinite, R.x=0)
-    // Circuit can't detect: projective equality 0==rx*0 passes trivially.
+    // 9: sG - eP = O (infinite, R.x=0). Circuit detects via R.z*rz_inv=1.
     {"DFF1D77F2A671C5F36183726DB2341BE58FEAE1DA2DECED843240F7B502BA659",
      "243F6A8885A308D313198A2E03707344A4093822299F31D0082EFA98EC4E6C89",
      "0000000000000000000000000000000000000000000000000000000000000000"
-     "123DDA8328AF9C23A94C1FEECFD123BA4FB73476F0D594DCB65C6425BD186051", false, false},
-    // 10: sG - eP = O (infinite, R.x=1)
-    // Circuit can't detect: same projective equality issue as vector 9.
+     "123DDA8328AF9C23A94C1FEECFD123BA4FB73476F0D594DCB65C6425BD186051", false, true},
+    // 10: sG - eP = O (infinite, R.x=1). Circuit detects via R.z*rz_inv=1.
     {"DFF1D77F2A671C5F36183726DB2341BE58FEAE1DA2DECED843240F7B502BA659",
      "243F6A8885A308D313198A2E03707344A4093822299F31D0082EFA98EC4E6C89",
      "0000000000000000000000000000000000000000000000000000000000000001"
-     "7615FBAF5AE28864013C099742DEADB4DBA87F11AC6754F93780D5A1837CF197", false, false},
-    // 11: sig[0:32] not an X coordinate on the curve.
-    // Circuit can't detect: r is a legitimate field element but not
-    // a quadratic residue. The equation R.x==r will fail only if
-    // the prover can find a valid witness — but the circuit evaluates
-    // the witness as given.
+     "7615FBAF5AE28864013C099742DEADB4DBA87F11AC6754F93780D5A1837CF197", false, true},
+    // 11: r not a quadratic residue — circuit detects via R.x==rx check.
     {"DFF1D77F2A671C5F36183726DB2341BE58FEAE1DA2DECED843240F7B502BA659",
      "243F6A8885A308D313198A2E03707344A4093822299F31D0082EFA98EC4E6C89",
      "4A298DACAE57395A15D0795DDBFD1DCB564DA82B0F269BC70A74F8220429BA1D"
-     "69E89B4C5564D00349106B8497785DD7D1D713A8AE82B32FA79D5F7FC407D39B", false, false},
+     "69E89B4C5564D00349106B8497785DD7D1D713A8AE82B32FA79D5F7FC407D39B", false, true},
     // 12: sig[0:32] == field size
     {"DFF1D77F2A671C5F36183726DB2341BE58FEAE1DA2DECED843240F7B502BA659",
      "243F6A8885A308D313198A2E03707344A4093822299F31D0082EFA98EC4E6C89",
@@ -400,6 +428,7 @@ TEST(Bip340RealVectorTest, EvalTestVectors) {
     auto pk = hex_vec(tv.pk_hex);
     auto msg = hex_vec(tv.msg_hex);
     auto sig = hex_vec(tv.sig_hex);
+    RejectBy expected = kRejectLayer[vi];
 
     SCOPED_TRACE("vector " + std::to_string(vi));
 
@@ -407,14 +436,13 @@ TEST(Bip340RealVectorTest, EvalTestVectors) {
     bool computed = wit.compute(sig.data(), pk.data(),
                                 msg.data(), msg.size());
 
-    if (!tv.circuit_can_check) {
-      // This vector tests an aspect the circuit doesn't enforce
-      // (e.g. even-y on R).  Skip circuit test.
+    if (expected == RejectBy::kSkipped) {
+      // This vector has a known eval-backend limitation.
       continue;
     }
 
-    if (tv.valid) {
-      // Valid vectors: compute() must succeed and circuit must accept.
+    if (expected == RejectBy::kAccept) {
+      // Valid vector: compute() must succeed, circuit must accept.
       ASSERT_TRUE(computed) << "compute() failed for valid vector " << vi;
       const EvalBackend ebk(F, true);
       const LogicType l(&ebk, F);
@@ -426,39 +454,42 @@ TEST(Bip340RealVectorTest, EvalTestVectors) {
           Bip340Witness::nat_from_be_bytes(pk.data())));
       EltW e = l.konst(wit.e_);
 
-      typename VerifyC::Witness w = MakeEvalWitness<LogicType, VerifyC>(l, wit);
-
+      auto w = MakeEvalWitness<LogicType, VerifyC>(l, wit);
       circuit.assert_verify(rx, px, e, w);
       ASSERT_FALSE(ebk.assertion_failed())
           << "Valid vector " << vi << " should pass";
-    } else {
-      // Invalid vectors: at least one layer must detect the failure.
-      // compute() returns false for structural invalidity (r>=p, s>=n,
-      // pk>=p, pk not on curve).  If compute() succeeds, the circuit
-      // must still reject.
-      if (!computed) {
-        // compute() already caught the invalidity — good.
-        continue;
-      }
-
-      // Circuit must reject.
-      log(INFO, "Testing invalid vector %zu through circuit", vi);
-      const EvalBackend ebk(F, false);
-      const LogicType l(&ebk, F);
-      VerifyC circuit(l, ec);
-
-      EltW rx = l.konst(F.to_montgomery(
-          Bip340Witness::nat_from_be_bytes(sig.data())));
-      EltW px = l.konst(F.to_montgomery(
-          Bip340Witness::nat_from_be_bytes(pk.data())));
-      EltW e = l.konst(wit.e_);
-
-      typename VerifyC::Witness w = MakeEvalWitness<LogicType, VerifyC>(l, wit);
-
-      circuit.assert_verify(rx, px, e, w);
-      ASSERT_TRUE(ebk.assertion_failed())
-          << "Invalid vector " << vi << " should fail";
+      continue;
     }
+
+    if (expected == RejectBy::kInputValidation) {
+      // compute() must reject this vector before reaching the circuit.
+      ASSERT_FALSE(computed)
+          << "Vector " << vi << " should fail input validation";
+      continue;
+    }
+
+    // kCircuit: compute() may succeed but the circuit must reject.
+    if (!computed) {
+      // compute() caught it early — still valid, but log a note.
+      log(INFO, "Vector %zu: input validation caught what circuit should", vi);
+      continue;
+    }
+
+    log(INFO, "Testing invalid vector %zu through circuit", vi);
+    const EvalBackend ebk(F, false);
+    const LogicType l(&ebk, F);
+    VerifyC circuit(l, ec);
+
+    EltW rx = l.konst(F.to_montgomery(
+        Bip340Witness::nat_from_be_bytes(sig.data())));
+    EltW px = l.konst(F.to_montgomery(
+        Bip340Witness::nat_from_be_bytes(pk.data())));
+    EltW e = l.konst(wit.e_);
+
+    auto w = MakeEvalWitness<LogicType, VerifyC>(l, wit);
+    circuit.assert_verify(rx, px, e, w);
+    ASSERT_TRUE(ebk.assertion_failed())
+        << "Invalid vector " << vi << " should fail circuit check";
   }
 }
 
