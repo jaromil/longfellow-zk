@@ -249,8 +249,6 @@ TEST_F(Bip340EvalTest, WrongChallengeFails) {
 
 // ====================== BIP-340 Test Vector Tests =======================
 
-// ====================== BIP-340 Test Vector Tests =======================
-
 // Returns the integer value of a hex character (0-15), or -1 if invalid.
 inline int HexValue(char c) {
   if (c >= '0' && c <= '9') return c - '0';
