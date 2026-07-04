@@ -243,6 +243,8 @@ TEST_F(Bip340EvalTest, WrongChallengeFails) {
 
 // ====================== BIP-340 Test Vector Tests =======================
 
+// ====================== BIP-340 Test Vector Tests =======================
+
 // Helper: parse hex string to byte vector.
 inline std::vector<uint8_t> hex_vec(const char* hex) {
   size_t len = std::strlen(hex);
@@ -309,21 +311,15 @@ const Bip340RealVector kRealVectors[] = {
      "FFF97BD5755EEEA420453A14355235D382F6472F8568A18B2F057A1460297556"
      "3CC27944640AC607CD107AE10923D9EF7A73C643E166BE5EBEAFA34B1AC553E2", false, false},
     // 7: negated message
-    // circuit_can_check=false: eval-backend stack corruption
-    // from Witness struct; will be fixed by witness layout
-    // centralization in the adversarial test section.
     {"DFF1D77F2A671C5F36183726DB2341BE58FEAE1DA2DECED843240F7B502BA659",
      "243F6A8885A308D313198A2E03707344A4093822299F31D0082EFA98EC4E6C89",
      "1FA62E331EDBC21C394792D2AB1100A7B432B013DF3F6FF4F99FCB33E0E1515F"
-     "28890B3EDB6E7189B630448B515CE4F8622A954CFE545735AAEA5134FCCDB2BD", false, false},
+     "28890B3EDB6E7189B630448B515CE4F8622A954CFE545735AAEA5134FCCDB2BD", false, true},
     // 8: negated s value
-    // circuit_can_check=false: subject to evaluation-backend
-    // stack corruption; will be re-enabled after adversarial
-    // test suite adds proper eval-witness centralization.
     {"DFF1D77F2A671C5F36183726DB2341BE58FEAE1DA2DECED843240F7B502BA659",
      "243F6A8885A308D313198A2E03707344A4093822299F31D0082EFA98EC4E6C89",
      "6CFF5C3BA86C69EA4B7376F31A9BCB4F74C1976089B2D9963DA2E5543E177769"
-     "961764B3AA9B2FFCB6EF947B6887A226E8D7C93E00C5ED0C1834FF0D0C2E6DA6", false, false},
+     "961764B3AA9B2FFCB6EF947B6887A226E8D7C93E00C5ED0C1834FF0D0C2E6DA6", false, true},
     // 9: sG - eP = O (infinite, R.x=0)
     // Circuit can't detect: projective equality 0==rx*0 passes trivially.
     {"DFF1D77F2A671C5F36183726DB2341BE58FEAE1DA2DECED843240F7B502BA659",
@@ -609,6 +605,67 @@ inline Bip340TestData MakeTestData(Nat s_nat = Nat(2ull),
   ec.normalize(sG);
 
   return {s_nat, e_nat, P.x, py, sG.x};
+}
+
+// ====================== Soundness Tests ================================
+
+TEST(Bip340SoundnessTest, OddRYWitnessFails) {
+  using EvalBackend = EvaluationBackend<Field>;
+  using LogicType = Logic<Field, EvalBackend>;
+  using VerifyC = Bip340Verify<LogicType, Field, EC>;
+
+  const Field& F = p256k1_base;
+  const EC& ec = p256k1;
+
+  auto d = MakeTestData();
+  Bip340Witness wit(ec);
+  ASSERT_TRUE(wit.compute_from_scalars(d.s_nat, d.e_nat, d.px, d.py));
+
+  // Subcase 1: odd ry with consistent odd bits — fails LSB-zero check.
+  {
+    const EvalBackend ebk(F, false);
+    const LogicType l(&ebk, F);
+    VerifyC circuit(l, ec);
+
+    auto rxx = l.konst(d.rx);
+    auto pxx = l.konst(d.px);
+    auto ee = l.konst(wit.e_);
+
+    auto w = MakeEvalWitness<LogicType, VerifyC>(l, wit);
+
+    // Mutate: set ry to odd (negate it) and fill bits_ry for the odd value.
+    Elt odd_ry = F.negf(wit.ry_);
+    w.ry = l.konst(odd_ry);
+    Nat odd_ry_nat = F.from_montgomery(odd_ry);
+    for (size_t i = 0; i < 256; ++i) {
+      w.bits_ry[i] = l.konst(
+          F.of_scalar(odd_ry_nat.bit(255 - i)));
+    }
+
+    circuit.assert_verify(rxx, pxx, ee, w);
+    EXPECT_TRUE(ebk.assertion_failed())
+        << "Odd ry with odd bits should fail LSB-zero check";
+  }
+
+  // Subcase 2: odd ry with original even bits — fails reconstruction.
+  {
+    const EvalBackend ebk(F, false);
+    const LogicType l(&ebk, F);
+    VerifyC circuit(l, ec);
+
+    auto rxx = l.konst(d.rx);
+    auto pxx = l.konst(d.px);
+    auto ee = l.konst(wit.e_);
+
+    auto w = MakeEvalWitness<LogicType, VerifyC>(l, wit);
+
+    // Mutate: set ry to odd but keep original even bits.
+    w.ry = l.konst(F.negf(wit.ry_));
+
+    circuit.assert_verify(rxx, pxx, ee, w);
+    EXPECT_TRUE(ebk.assertion_failed())
+        << "Odd ry with even bits should fail reconstruction";
+  }
 }
 
 class Bip340ZkTest : public ::testing::Test {
