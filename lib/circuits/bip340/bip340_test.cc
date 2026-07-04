@@ -468,6 +468,10 @@ TEST(Bip340RealVectorTest, EvalTestVectors) {
   }
 }
 
+// Compares only semantic facts invariant across the Sage affine model
+// and the C++ projective double-and-add witness.  Implementation-
+// specific projective values (e.g. rz_inv) are intentionally excluded
+// because Sage and the production C++ verifier compute them differently.
 TEST(Bip340RealVectorTest, CppWitnessMatchesSemanticGoldenFacts) {
   const Field& F = p256k1_base;
   const EC& ec = p256k1;
