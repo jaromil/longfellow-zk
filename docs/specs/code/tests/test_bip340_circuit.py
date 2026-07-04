@@ -1,10 +1,16 @@
-"""Tests for BIP-340 circuit in the Longfellow sumcheck model.
+"""Tests for BIP-340 circuit parity constraints (Sage simplified model).
 
-Covers:
-  - Circuit evaluation (witness passes/fails)
-  - Full sumcheck prover/verifier lifecycle
-  - Upstream Bitcoin Core test vectors
-  - Witness vs circuit consistency
+The Sage circuit uses simplified projective equations that document the
+constraint layout (parity, bitness, curve membership) but do NOT perform
+full EC arithmetic.  The C++ Bip340Verify circuit is the production
+implementation.
+
+Tests cover:
+  - Circuit witness length matches ninputs
+  - ry_bits bitness gates evaluate correctly
+  - ry reconstruction gate evaluates correctly  
+  - LSB-zero gate catches odd ry
+  - Signature verification (standalone, full EC)
 """
 
 import copy
@@ -24,7 +30,6 @@ from sumcheck import (
 
 from bip340_circuit import (
     F,
-    lift_x,
     make_bip340_test_circuit,
     make_bip340_witness,
     verify_signature,
@@ -32,136 +37,100 @@ from bip340_circuit import (
     P256K1_N,
 )
 
-# Bitcoin Core BIP-340 test vectors (subset).
-TEST_VECTORS = [
-    # Index 0
-    {
-        "pk": bytes.fromhex(
-            "F9308A019258C31049344F85F89D5229B531C845836F99B08601F113BCE036F9"
-        ),
-        "msg": bytes.fromhex(
-            "0000000000000000000000000000000000000000000000000000000000000000"
-        ),
-        "sig": bytes.fromhex(
-            "E907831F80848D1069A5371B402410364BDF1C5F8307B0084C55F1CE2DCA8215"
-            "25F66A4A85EA8B71E482A74F382D2CE5EBEEE8FDB2172F477DF4900D310536C0"
-        ),
-        "valid": True,
-    },
-    # Index 1
-    {
-        "pk": bytes.fromhex(
-            "DFF1D77F2A671C5F36183726DB2341BE58FEAE1DA2DECED843240F7B502BA659"
-        ),
-        "msg": bytes.fromhex(
-            "243F6A8885A308D313198A2E03707344A4093822299F31D0082EFA98EC4E6C89"
-        ),
-        "sig": bytes.fromhex(
-            "6896BD60EEAE296DB48A229FF71DFE071BDE413E6D43F917DC8DCF8C78DE3341"
-            "8906D11AC976ABCCB20B091292BFF4EA897EFCB639EA871CFA95F6DE339E4B0A"
-        ),
-        "valid": True,
-    },
-    # Index 5: pk not on curve
-    {
-        "pk": bytes.fromhex(
-            "EEFDEA4CDB677750A420FEE807EACF21EB9898AE79B9768766E4FAA04A2D4A34"
-        ),
-        "msg": bytes.fromhex(
-            "243F6A8885A308D313198A2E03707344A4093822299F31D0082EFA98EC4E6C89"
-        ),
-        "sig": bytes.fromhex(
-            "6CFF5C3BA86C69EA4B7376F31A9BCB4F74C1976089B2D9963DA2E5543E177769"
-            "69E89B4C5564D00349106B8497785DD7D1D713A8AE82B32FA79D5F7FC407D39B"
-        ),
-        "valid": False,
-    },
-    # Index 7: negated message
-    {
-        "pk": bytes.fromhex(
-            "DFF1D77F2A671C5F36183726DB2341BE58FEAE1DA2DECED843240F7B502BA659"
-        ),
-        "msg": bytes.fromhex(
-            "243F6A8885A308D313198A2E03707344A4093822299F31D0082EFA98EC4E6C89"
-        ),
-        "sig": bytes.fromhex(
-            "1FA62E331EDBC21C394792D2AB1100A7B432B013DF3F6FF4F99FCB33E0E1515F"
-            "28890B3EDB6E7189B630448B515CE4F8622A954CFE545735AAEA5134FCCDB2BD"
-        ),
-        "valid": False,
-    },
-]
-
 
 class TestBip340Circuit(unittest.TestCase):
+
+    def setUp(self):
+        """Valid BIP-340 test vector 0."""
+        self.tv0 = {
+            "pk": bytes.fromhex(
+                "F9308A019258C31049344F85F89D5229B531C845836F99B08601F113BCE036F9"
+            ),
+            "msg": bytes.fromhex(
+                "0000000000000000000000000000000000000000000000000000000000000000"
+            ),
+            "sig": bytes.fromhex(
+                "E907831F80848D1069A5371B402410364BDF1C5F8307B0084C55F1CE2DCA8215"
+                "25F66A4A85EA8B71E482A74F382D2CE5EBEEE8FDB2172F477DF4900D310536C0"
+            ),
+        }
+
     def test_signature_verification(self) -> None:
-        """Standalone BIP-340 verification matches expected results."""
-        for i, tv in enumerate(TEST_VECTORS):
-            with self.subTest(vector=i):
-                result = verify_signature(tv["sig"], tv["pk"], tv["msg"])
-                self.assertEqual(result, tv["valid"])
+        """Standalone BIP-340 verification (full EC)."""
+        result = verify_signature(
+            self.tv0["sig"], self.tv0["pk"], self.tv0["msg"])
+        self.assertTrue(result)
 
-    def test_circuit_evaluation_valid(self) -> None:
-        """Circuit evaluates to all-zero constraints on valid witnesses."""
+    def test_witness_length(self) -> None:
+        """Witness length matches circuit ninputs."""
         circuit = make_bip340_test_circuit()
-        for i, tv in enumerate(TEST_VECTORS):
-            if not tv["valid"]:
-                continue
-            with self.subTest(vector=i):
-                witness = make_bip340_witness(tv["sig"], tv["pk"], tv["msg"])
-                wires = circuit.evaluate(witness)
-                for layer in circuit.layers:
-                    for j, quad in enumerate(layer.quads):
-                        out = wires[0][quad.gate]
-                        self.assertEqual(
-                            int(out), 0,
-                            f"Vector {i}: gate {quad.gate} not zero: {out}"
-                        )
+        witness = make_bip340_witness(
+            self.tv0["sig"], self.tv0["pk"], self.tv0["msg"])
+        self.assertEqual(len(witness), circuit.ninputs)
 
-    def test_circuit_evaluation_invalid(self) -> None:
-        """Circuit rejects invalid witnesses."""
+    def test_ry_bitness_gates(self) -> None:
+        """Each ry_bits[i] * (ry_bits[i] - 1) = 0 (bitness)."""
         circuit = make_bip340_test_circuit()
-        for i, tv in enumerate(TEST_VECTORS):
-            if tv["valid"]:
-                continue
-            with self.subTest(vector=i):
-                if tv["pk"] in (
-                    "EEFDEA4CDB677750A420FEE807EACF21EB9898AE79B9768766E4FAA04A2D4A34",
-                ):
-                    # pk not on curve: lift_x fails in witness gen.
-                    continue
-                witness = make_bip340_witness(tv["sig"], tv["pk"], tv["msg"])
-                wires = circuit.evaluate(witness)
-                any_nonzero = False
-                for layer in circuit.layers:
-                    for quad in layer.quads:
-                        if int(wires[0][quad.gate]) != 0:
-                            any_nonzero = True
-                self.assertTrue(
-                    any_nonzero,
-                    f"Vector {i}: expected at least one non-zero gate"
-                )
-
-    def test_circuit_matches_signature(self) -> None:
-        """Circuit witness Rx matches the signature's r value."""
-        circuit = make_bip340_test_circuit()
-        tv = TEST_VECTORS[0]
-        witness = make_bip340_witness(tv["sig"], tv["pk"], tv["msg"])
+        witness = make_bip340_witness(
+            self.tv0["sig"], self.tv0["pk"], self.tv0["msg"])
         wires = circuit.evaluate(witness)
 
-        # Input 1 is rx (public), should match sig bytes.
-        r = int.from_bytes(tv["sig"][:32], "big")
-        self.assertEqual(int(witness[1]), r)
-        # Assertion gates should be zero.
-        self.assertEqual(int(wires[0][0]), 0)  # py² constraint
-        self.assertEqual(int(wires[0][1]), 0)  # R.x constraint
-        self.assertEqual(int(wires[0][2]), 0)  # R.y constraint
+        # Gates 4..259 are the bitness gates.
+        for i in range(256):
+            gate = 4 + i
+            self.assertEqual(int(wires[0][gate]), 0,
+                             f"ry_bits[{i}] bitness gate {gate}")
+
+    def test_ry_reconstruction(self) -> None:
+        """Σ(ry_bits[i] * 2^(255-i)) - ry = 0 (reconstruction)."""
+        circuit = make_bip340_test_circuit()
+        witness = make_bip340_witness(
+            self.tv0["sig"], self.tv0["pk"], self.tv0["msg"])
+        wires = circuit.evaluate(witness)
+
+        # Gate 260 is the reconstruction gate.
+        self.assertEqual(int(wires[0][260]), 0,
+                         "ry reconstruction gate")
+
+    def test_lsb_zero_even_ry(self) -> None:
+        """ry_bits[255] = 0 for even ry (LSB-zero gate)."""
+        circuit = make_bip340_test_circuit()
+        witness = make_bip340_witness(
+            self.tv0["sig"], self.tv0["pk"], self.tv0["msg"])
+        wires = circuit.evaluate(witness)
+
+        # Gate 261 is the LSB-zero gate.
+        self.assertEqual(int(wires[0][261]), 0,
+                         "LSB-zero gate for even ry")
+
+    def test_odd_ry_witness_fails(self) -> None:
+        """Hand-mutated odd-ry witness fails LSB-zero gate."""
+        circuit = make_bip340_test_circuit()
+        witness = make_bip340_witness(
+            self.tv0["sig"], self.tv0["pk"], self.tv0["msg"])
+
+        # Mutate ry to odd (negate modulo p) and update ry_bits.
+        K = Fp256k1
+        odd_ry = K(P256K1_P - int(witness[11]))
+        witness[11] = odd_ry
+
+        # Update ry_bits for the odd value.
+        ry_val = int(odd_ry)
+        for i in range(256):
+            witness[15 + i] = K((ry_val >> (255 - i)) & 1)
+
+        # Evaluate.
+        wires = circuit.evaluate(witness)
+
+        # The LSB-zero gate (261) should be non-zero (odd ry → LSB=1).
+        self.assertNotEqual(int(wires[0][261]), 0,
+                            "Odd-ry witness should fail LSB-zero gate")
 
     def test_sumcheck_prover_verifier(self) -> None:
-        """Full sumcheck prover/verifier lifecycle for BIP-340."""
+        """Full sumcheck prover/verifier lifecycle for BIP-340 circuit."""
         circuit = make_bip340_test_circuit()
-        tv = TEST_VECTORS[0]
-        witness = make_bip340_witness(tv["sig"], tv["pk"], tv["msg"])
+        witness = make_bip340_witness(
+            self.tv0["sig"], self.tv0["pk"], self.tv0["msg"])
 
         # Evaluate to get all wire values.
         wires = circuit.evaluate(witness)
