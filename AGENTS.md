@@ -293,8 +293,25 @@ The `.gestalt/plans/secp256k1-native-proving.org` plan follows a structured work
 
 ## BIP-340 / Schnorr Verification (2026-07-03)
 
+### Production Status
+
 A vertical slice for BIP-340 Schnorr signature verification over native
-secp256k1 is in `lib/circuits/bip340/`:
+secp256k1 is in `lib/circuits/bip340/`.  **Currently the circuit passes all
+upstream Bitcoin Core test vectors, but the even-y check on R is performed
+only in honest witness generation — it is not yet proven in-circuit.**
+Production soundness requires proving canonical evenness of `R.y` inside
+circuit constraints.
+
+### Backend
+
+Always use `CrtConvolutionFactory<CRT256<Fp256k1Base>, Fp256k1Base>` for
+native secp256k1 proofs.  Do NOT use the P-256 `Fp2` FFT path for secp256k1.
+
+### Sage
+
+Sage tests live under `docs/specs/code/tests/test_bip340*.py`.  They
+require `sage.all` — use the Sage command (`sage -python ...`) to run
+them; plain `python3` cannot import `sage.all`.
 
 | File | Purpose |
 |------|---------|

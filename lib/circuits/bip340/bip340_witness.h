@@ -28,10 +28,25 @@
 
 namespace proofs {
 
-/// Computes witnesses for the Bip340Verify circuit.
+/// Witness generator for the Bip340Verify production circuit.
 ///
-/// Holds field elements representing bits of s and e,
-/// intermediate points for the double-and-add loops, and py.
+/// Holds field elements for the private witness, computed either from
+/// raw BIP-340 signature bytes or directly from known scalars (for
+/// testing).  The witness layout matches Bip340Verify::Witness::input().
+///
+/// Fields (in witness input order):
+///   bits_s[256], int_sx[255], int_sy[255], int_sz[255]  — s·G trace
+///   bits_e[256], int_ex[255], int_ey[255], int_ez[255]  — e·P trace
+///   py        — affine P.y (the even square root of px³+7)
+///   ry        — affine R.y (computed from s·G - e·P)
+///   rz_inv    — inverse of R.z (proves R ≠ point-at-infinity)
+///   bits_ry[256] — bits of affine ry, MSB-first, allowing the circuit
+///                  to reconstruct ry and enforce even parity (LSB=0).
+///
+/// Validation performed by compute() (NOT proven in-circuit):
+///   - rx < p, s < n, px < p (structural)
+///   - px is liftable (even-y curve point exists)
+///   - e is computed from BIP-340 tagged SHA-256
 class Bip340Witness {
   using Field = Fp256k1Base;
   using Elt = typename Field::Elt;
