@@ -10,6 +10,7 @@
 #include <cstring>
 #include <functional>
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -250,20 +251,71 @@ TEST_F(Bip340EvalTest, WrongChallengeFails) {
 
 // ====================== BIP-340 Test Vector Tests =======================
 
-// Helper: parse hex string to byte vector.
-inline std::vector<uint8_t> hex_vec(const char* hex) {
+// Returns the integer value of a hex character (0-15), or -1 if invalid.
+inline int HexValue(char c) {
+  if (c >= '0' && c <= '9') return c - '0';
+  if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+  if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+  return -1;
+}
+
+// Parses a hex string to a byte vector.  Returns std::nullopt on any
+// malformed input (odd length or invalid hex characters).
+inline std::optional<std::vector<uint8_t>> ParseHexVec(const char* hex) {
   size_t len = std::strlen(hex);
+  if (len % 2 != 0) return std::nullopt;
   std::vector<uint8_t> out(len / 2);
   for (size_t i = 0; i < len; i += 2) {
-    auto val = [](char c) -> uint8_t {
-      if (c >= '0' && c <= '9') return c - '0';
-      if (c >= 'A' && c <= 'F') return c - 'A' + 10;
-      if (c >= 'a' && c <= 'f') return c - 'a' + 10;
-      return 0;
-    };
-    out[i / 2] = static_cast<uint8_t>((val(hex[i]) << 4) | val(hex[i + 1]));
+    int hi = HexValue(hex[i]);
+    int lo = HexValue(hex[i + 1]);
+    if (hi == -1 || lo == -1) return std::nullopt;
+    out[i / 2] = static_cast<uint8_t>((hi << 4) | lo);
   }
   return out;
+}
+
+// Helper: parse hex string to byte vector, failing the current test
+// on malformed input.
+inline std::vector<uint8_t> hex_vec(const char* hex) {
+  auto result = ParseHexVec(hex);
+  EXPECT_TRUE(result.has_value()) << "hex_vec: malformed hex string \"" << hex << "\"";
+  if (!result.has_value()) return {};
+  return *result;
+}
+
+TEST(Bip340FixtureTest, HexVecRejectsMalformedInput) {
+  // Valid hex characters.
+  EXPECT_EQ(HexValue('0'), 0);
+  EXPECT_EQ(HexValue('9'), 9);
+  EXPECT_EQ(HexValue('A'), 10);
+  EXPECT_EQ(HexValue('F'), 15);
+  EXPECT_EQ(HexValue('a'), 10);
+  EXPECT_EQ(HexValue('f'), 15);
+  // Invalid characters.
+  EXPECT_EQ(HexValue('g'), -1);
+  EXPECT_EQ(HexValue(' '), -1);
+  EXPECT_EQ(HexValue('\x00'), -1);
+  EXPECT_EQ(HexValue('@'), -1);
+
+  // Valid hex string.
+  auto v = ParseHexVec("0A1b");
+  ASSERT_TRUE(v.has_value());
+  EXPECT_EQ(v->size(), 2u);
+  EXPECT_EQ((*v)[0], 0x0A);
+  EXPECT_EQ((*v)[1], 0x1B);
+
+  // Empty string.
+  v = ParseHexVec("");
+  ASSERT_TRUE(v.has_value());
+  EXPECT_EQ(v->size(), 0u);
+
+  // Odd length.
+  EXPECT_FALSE(ParseHexVec("0A1").has_value());
+  EXPECT_FALSE(ParseHexVec("A").has_value());
+
+  // Invalid characters.
+  EXPECT_FALSE(ParseHexVec("0g").has_value());
+  EXPECT_FALSE(ParseHexVec("GG").has_value());
 }
 
 struct Bip340RealVector {
