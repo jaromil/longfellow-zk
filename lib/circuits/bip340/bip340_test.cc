@@ -7,6 +7,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <memory>
 
 #include "algebra/crt.h"
@@ -593,6 +594,115 @@ TEST(Bip340SoundnessTest, OddRYWitnessFails) {
     circuit.assert_verify(rxx, pxx, ee, w);
     EXPECT_TRUE(ebk.assertion_failed())
         << "Odd ry with even bits should fail reconstruction";
+  }
+}
+
+// ====================== Mutation Tests ==================================
+
+TEST(Bip340MutationTest, PrivateWitnessMutations) {
+  using EvalBackend = EvaluationBackend<Field>;
+  using LogicType = Logic<Field, EvalBackend>;
+  using EltW = typename LogicType::EltW;
+  using VerifyC = Bip340Verify<LogicType, Field, EC>;
+
+  const Field& F = p256k1_base;
+  const EC& ec = p256k1;
+
+  auto d = MakeTestData();
+  Bip340Witness wit(ec);
+  ASSERT_TRUE(wit.compute_from_scalars(d.s_nat, d.e_nat, d.px, d.py));
+
+  // Test each mutation: build eval circuit, mutate one witness field,
+  // assert circuit rejects.
+  auto run_mutation = [&](const char* name,
+                          std::function<void(typename VerifyC::Witness&,
+                                             const LogicType&)> mutate) {
+    const EvalBackend ebk(F, false);
+    const LogicType l(&ebk, F);
+    VerifyC circuit(l, ec);
+
+    auto w = MakeEvalWitness<LogicType, VerifyC>(l, wit);
+    mutate(w, l);
+
+    circuit.assert_verify(l.konst(d.rx), l.konst(d.px),
+                           l.konst(wit.e_), w);
+    EXPECT_TRUE(ebk.assertion_failed())
+        << "Mutation '" << name << "' should be rejected";
+  };
+
+  run_mutation("flip bits_s[10]", [&](auto& w, const auto& l) {
+    w.bits_s[10] = l.konst(F.subf(F.one(), wit.bits_s_[10]));
+  });
+  run_mutation("flip bits_e[20]", [&](auto& w, const auto& l) {
+    w.bits_e[20] = l.konst(F.subf(F.one(), wit.bits_e_[20]));
+  });
+  // Use the last intermediate (index 254) which is non-trivial
+  // for typical scalar values (not the point at infinity).
+  run_mutation("corrupt int_sx[254]", [&](auto& w, const auto& l) {
+    w.int_sx[254] = l.konst(F.zero());
+  });
+  run_mutation("corrupt int_sy[254]", [&](auto& w, const auto& l) {
+    w.int_sy[254] = l.konst(F.zero());
+  });
+  run_mutation("corrupt int_sz[254]", [&](auto& w, const auto& l) {
+    w.int_sz[254] = l.konst(F.zero());
+  });
+  run_mutation("negate py", [&](auto& w, const auto& l) {
+    w.py = l.konst(F.negf(wit.py_));
+  });
+  run_mutation("corrupt bits_ry[0]", [&](auto& w, const auto& l) {
+    w.bits_ry[0] = l.konst(F.subf(F.one(), wit.bits_ry_[0]));
+  });
+  run_mutation("set rz_inv to zero", [&](auto& w, const auto& l) {
+    w.rz_inv = l.konst(F.zero());
+  });
+  run_mutation("corrupt int_ey[254]", [&](auto& w, const auto& l) {
+    w.int_ey[254] = l.konst(F.zero());
+  });
+}
+
+TEST(Bip340MutationTest, PublicInputMutations) {
+  using EvalBackend = EvaluationBackend<Field>;
+  using LogicType = Logic<Field, EvalBackend>;
+  using VerifyC = Bip340Verify<LogicType, Field, EC>;
+
+  const Field& F = p256k1_base;
+  const EC& ec = p256k1;
+
+  auto d = MakeTestData();
+  Bip340Witness wit(ec);
+  ASSERT_TRUE(wit.compute_from_scalars(d.s_nat, d.e_nat, d.px, d.py));
+
+  // Wrong rx.
+  {
+    const EvalBackend ebk(F, false);
+    const LogicType l(&ebk, F);
+    VerifyC circuit(l, ec);
+    auto w = MakeEvalWitness<LogicType, VerifyC>(l, wit);
+    circuit.assert_verify(l.konst(F.negf(d.rx)), l.konst(d.px),
+                           l.konst(wit.e_), w);
+    EXPECT_TRUE(ebk.assertion_failed()) << "Wrong rx should be rejected";
+  }
+  // Wrong px.
+  {
+    const EvalBackend ebk(F, false);
+    const LogicType l(&ebk, F);
+    VerifyC circuit(l, ec);
+    auto w = MakeEvalWitness<LogicType, VerifyC>(l, wit);
+    circuit.assert_verify(l.konst(d.rx), l.konst(F.negf(d.px)),
+                           l.konst(wit.e_), w);
+    EXPECT_TRUE(ebk.assertion_failed()) << "Wrong px should be rejected";
+  }
+  // Wrong e.
+  {
+    const EvalBackend ebk(F, false);
+    const LogicType l(&ebk, F);
+    VerifyC circuit(l, ec);
+    auto w = MakeEvalWitness<LogicType, VerifyC>(l, wit);
+    Elt wrong_e = F.addf(wit.e_, F.one());
+    circuit.assert_verify(l.konst(d.rx), l.konst(d.px),
+                           l.konst(wrong_e), w);
+    EXPECT_TRUE(ebk.assertion_failed()) << "Wrong e should be rejected";
   }
 }
 
