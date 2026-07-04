@@ -276,7 +276,7 @@ enum class RejectBy {
   kAccept = 0,          // valid signature; circuit must accept
   kInputValidation,     // rejected by compute() before reaching circuit
   kCircuit,             // accepted by compute() but rejected by circuit
-  kSkipped,             // not tested through circuit (legacy limitation)
+  kSkipped,             // not tested through circuit
 };
 
 /// For each invalid vector, which layer is expected to catch it.
@@ -297,10 +297,10 @@ constexpr RejectBy kRejectLayer[] = {
     RejectBy::kInputValidation,   // 12: r >= p
     RejectBy::kInputValidation,   // 13: s >= n
     RejectBy::kInputValidation,   // 14: pk >= p
-    RejectBy::kSkipped,           // 15: valid (empty msg) — eval crash, skip
-    RejectBy::kSkipped,           // 16: valid (1-byte msg) — eval crash, skip
-    RejectBy::kSkipped,           // 17: valid (17-byte msg) — eval crash, skip
-    RejectBy::kSkipped,           // 18: valid (100-byte msg) — eval crash, skip
+    RejectBy::kAccept,            // 15: valid (empty msg)
+    RejectBy::kAccept,            // 16: valid (1-byte msg)
+    RejectBy::kAccept,            // 17: valid (17-byte msg)
+    RejectBy::kAccept,            // 18: valid (100-byte msg)
 };
 static_assert(sizeof(kRejectLayer) / sizeof(kRejectLayer[0]) == 19,
               "kRejectLayer must cover all 19 vectors");
@@ -343,7 +343,7 @@ TEST(Bip340RealVectorTest, EvalTestVectors) {
     if (expected == RejectBy::kAccept) {
       // Valid vector: compute() must succeed, circuit must accept.
       ASSERT_TRUE(computed) << "compute() failed for valid vector " << vi;
-      const EvalBackend ebk(F, true);
+      const EvalBackend ebk(F, false);
       const LogicType l(&ebk, F);
       VerifyC circuit(l, ec);
 

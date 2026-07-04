@@ -148,16 +148,15 @@ ctest --test-dir build -R 'P256K1|Bitaddr|Ecpk' --output-on-failure
 sudo apt install -y build-essential clang cmake libssl-dev libzstd-dev libgtest-dev libbenchmark-dev zlib1g-dev
 ```
 
-## Current State (2026-07-03)
+## Current State (2026-07-04)
 
-- **297/297 CTest tests pass** on main (297 includes 19 BIP-340 tests)
-- **secp256k1 field inversion and EC multi-exponentiation tests pass** (tests 53, 129)
-- **Native secp256k1 ZK proof code EXISTS but is NOT wired to CTest:**
-  - `lib/circuits/tests/ec/pk_circuit_test.cc` — typed tests for P256 + P256K1
-    including `ZkProverVerifier` using CRT backend + benchmarks. **No CMakeLists.txt.**
-  - `lib/circuits/tests/pq/bitaddr/bitaddr_test.cc` — Bitcoin address derivation ZK
-    proofs using `Fp256k1Base` + `CRT256<Fp256k1Base>`. **No CMakeLists.txt.**
-- **Neither directory has `add_subdirectory` in root CMakeLists.txt**
+- **299/299 CTest tests pass** on `bip340-production`.
+- **Native secp256k1 ZK proof tests are wired to CTest:**
+  - `lib/circuits/tests/ec/pk_circuit_test.cc` — typed tests for P256 + P256K1,
+    including `ZkProverVerifier` using the CRT backend.
+  - `lib/circuits/tests/pq/bitaddr/bitaddr_test.cc` — Bitcoin address derivation
+    proofs using `Fp256k1Base` + `CRT256<Fp256k1Base>`.
+- **BIP-340 C++ tests cover all 19 upstream Bitcoin Core vectors.**
 
 ## secp256k1 Proving Architecture
 
@@ -310,7 +309,7 @@ in `lib/circuits/bip340/`.  The circuit proves:
 wires=26,336, quad_terms=40,650, depth=8, block_enc≈42,955, padding=65,536
 
 **Tests:** 17 BIP-340 tests (eval, vectors, ZK prover/verifier, soundness,
-mutation, guard, params, scale).  295/295 full CTest passes.
+mutation, guard, params, scale).  299/299 full CTest passes.
 
 ### Backend
 
