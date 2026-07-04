@@ -1,8 +1,8 @@
-"""Cross-language golden-fact tests for BIP-340.
+"""Sage golden-fact tests for BIP-340.
 
-Compares Sage-generated field values (e, py, ry, rz_inv) against
-a checked-in golden.json fixture.  Any mismatch indicates drift
-between Sage and the C++ circuit's witness computation.
+Compares Sage-generated field values against a checked-in golden.json
+fixture.  The C++ tests separately compare the semantic witness facts
+that are invariant across the Sage affine model and C++ projective model.
 """
 
 import json
@@ -10,9 +10,7 @@ import os
 import unittest
 
 from bip340_circuit import (
-    F,
     make_bip340_witness,
-    verify_signature,
 )
 
 THIS_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -52,10 +50,10 @@ class TestBip340Golden(unittest.TestCase):
             rows = list(csv.DictReader(f))
 
         for i, row in enumerate(rows):
-            pk = bytes.fromhex(row['public_key'])
+            pk = bytes.fromhex(row['public key'])
             msg = bytes.fromhex(row['message']) if row['message'] else b''
             sig = bytes.fromhex(row['signature'])
-            valid = row['verification_result'].upper() == 'TRUE'
+            valid = row['verification result'].upper() == 'TRUE'
 
             fact = GOLDEN[i]
             self.assertEqual(fact['index'], i)

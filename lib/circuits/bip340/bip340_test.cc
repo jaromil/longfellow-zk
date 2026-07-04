@@ -7,8 +7,11 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
 #include <functional>
 #include <memory>
+#include <string>
+#include <vector>
 
 #include "algebra/crt.h"
 #include "algebra/crt_convolution.h"
@@ -268,7 +271,17 @@ struct Bip340RealVector {
   const char* msg_hex;
   const char* sig_hex;
   bool valid;
-  bool circuit_can_check;  // false for vectors the circuit can't distinguish
+};
+
+struct Bip340GoldenFact {
+  size_t index;
+  bool valid;
+  bool compute_success;
+  const char* rx_hex;
+  const char* px_hex;
+  const char* e_hex;
+  const char* py_hex;
+  const char* ry_hex;
 };
 
 /// Expected rejection layer for invalid vectors.
@@ -276,7 +289,6 @@ enum class RejectBy {
   kAccept = 0,          // valid signature; circuit must accept
   kInputValidation,     // rejected by compute() before reaching circuit
   kCircuit,             // accepted by compute() but rejected by circuit
-  kSkipped,             // not tested through circuit
 };
 
 /// For each invalid vector, which layer is expected to catch it.
@@ -311,6 +323,23 @@ static_assert(sizeof(kRejectLayer) / sizeof(kRejectLayer[0]) == 19,
 const Bip340RealVector kRealVectors[] = {
 #include "testdata/bip340_vectors.inc"
 };
+static_assert(sizeof(kRealVectors) / sizeof(kRealVectors[0]) == 19,
+              "kRealVectors must cover all 19 vectors");
+
+const Bip340GoldenFact kGoldenFacts[] = {
+#include "testdata/bip340_golden.inc"
+};
+static_assert(sizeof(kGoldenFacts) / sizeof(kGoldenFacts[0]) == 19,
+              "kGoldenFacts must cover all 19 vectors");
+
+Elt EltFromHex(const Field& F, const char* hex) {
+  auto be = hex_vec(hex);
+  uint8_t le[32] = {0};
+  for (size_t i = 0; i < be.size(); ++i) {
+    le[i] = be[be.size() - 1 - i];
+  }
+  return F.to_montgomery(Nat::of_bytes(le, 256));
+}
 
 TEST(Bip340RealVectorTest, EvalTestVectors) {
   using EvalBackend = EvaluationBackend<Field>;
@@ -334,11 +363,6 @@ TEST(Bip340RealVectorTest, EvalTestVectors) {
     Bip340Witness wit(ec);
     bool computed = wit.compute(sig.data(), pk.data(),
                                 msg.data(), msg.size());
-
-    if (expected == RejectBy::kSkipped) {
-      // This vector has a known eval-backend limitation.
-      continue;
-    }
 
     if (expected == RejectBy::kAccept) {
       // Valid vector: compute() must succeed, circuit must accept.
@@ -389,6 +413,41 @@ TEST(Bip340RealVectorTest, EvalTestVectors) {
     circuit.assert_verify(rx, px, e, w);
     ASSERT_TRUE(ebk.assertion_failed())
         << "Invalid vector " << vi << " should fail circuit check";
+  }
+}
+
+TEST(Bip340RealVectorTest, CppWitnessMatchesSemanticGoldenFacts) {
+  const Field& F = p256k1_base;
+  const EC& ec = p256k1;
+
+  for (size_t vi = 0; vi < sizeof(kRealVectors) / sizeof(kRealVectors[0]);
+       ++vi) {
+    const auto& tv = kRealVectors[vi];
+    const auto& fact = kGoldenFacts[vi];
+    auto pk = hex_vec(tv.pk_hex);
+    auto msg = hex_vec(tv.msg_hex);
+    auto sig = hex_vec(tv.sig_hex);
+
+    SCOPED_TRACE("vector " + std::to_string(vi));
+    ASSERT_EQ(fact.index, vi);
+    ASSERT_EQ(fact.valid, tv.valid);
+
+    Bip340Witness wit(ec);
+    bool computed = wit.compute(sig.data(), pk.data(),
+                                msg.data(), msg.size());
+    if (!computed) {
+      ASSERT_FALSE(tv.valid);
+      continue;
+    }
+
+    if (!fact.compute_success) {
+      ASSERT_FALSE(tv.valid);
+      continue;
+    }
+
+    EXPECT_EQ(wit.e_, EltFromHex(F, fact.e_hex));
+    EXPECT_EQ(wit.py_, EltFromHex(F, fact.py_hex));
+    EXPECT_EQ(wit.ry_, EltFromHex(F, fact.ry_hex));
   }
 }
 
@@ -489,13 +548,13 @@ TEST(Bip340SizeTest, CircuitSize) {
   const LogicCircuit lc(&cbk, p256k1_base);
   VerifyC circuit(lc, p256k1);
 
-  typename VerifyC::Witness w;
-  Q.private_input();
-  w.input(lc);
-
   EltW rx = lc.eltw_input();
   EltW px = lc.eltw_input();
   EltW e = lc.eltw_input();
+
+  typename VerifyC::Witness w;
+  Q.private_input();
+  w.input(lc);
 
   circuit.assert_verify(rx, px, e, w);
   auto C = Q.mkcircuit(1);
@@ -1089,13 +1148,13 @@ TEST(Bip340ParamTest, ReportCircuitParams) {
   const LogicCircuit lc(&cbk, p256k1_base);
   VerifyC circuit(lc, p256k1);
 
-  typename VerifyC::Witness w;
-  Q.private_input();
-  w.input(lc);
-
   EltW rx = lc.eltw_input();
   EltW px = lc.eltw_input();
   EltW e = lc.eltw_input();
+
+  typename VerifyC::Witness w;
+  Q.private_input();
+  w.input(lc);
 
   circuit.assert_verify(rx, px, e, w);
   auto C = Q.mkcircuit(1);

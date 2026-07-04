@@ -150,7 +150,7 @@ sudo apt install -y build-essential clang cmake libssl-dev libzstd-dev libgtest-
 
 ## Current State (2026-07-04)
 
-- **300/300 CTest tests pass** on `bip340-production`.
+- **301/301 CTest tests pass** on `bip340-production`.
 - **Native secp256k1 ZK proof tests are wired to CTest:**
   - `lib/circuits/tests/ec/pk_circuit_test.cc` — typed tests for P256 + P256K1,
     including `ZkProverVerifier` using the CRT backend.
@@ -307,10 +307,10 @@ in `lib/circuits/bip340/`.  The circuit proves:
   - LSB of ry = 0 (canonical evenness).
 
 **Circuit metrics (single BIP-340 verify):**
-wires=26,802, quad_terms=41,443, depth=9, block_enc≈43,748, padding=65,536
+wires=26,802, quad_terms=41,443, depth=9, block_enc≈43,745, padding=65,536
 
-**Tests:** 20 BIP-340 CTest tests (eval, vectors, ZK prover/verifier,
-soundness, mutation, guard, params, scale).  300/300 full CTest passes.
+**Tests:** 21 BIP-340 CTest tests (eval, vectors, ZK prover/verifier,
+soundness, mutation, guard, params, scale).  301/301 full CTest passes.
 
 ### Backend
 
@@ -329,12 +329,21 @@ BIP-340 Sage tests with:
 The runner uses a Python that can import `sage.all` and falls back to
 `sage -python` when available.
 
+The raw Bitcoin Core BIP-340 CSV is checked in at
+`lib/circuits/bip340/testdata/bip340_test_vectors.csv`.  Regenerate the C++
+fixtures, or refresh the CSV from Bitcoin Core, with:
+
+```bash
+python3 docs/specs/code/generate_bip340_vectors_inc.py
+python3 docs/specs/code/generate_bip340_vectors_inc.py --refresh-bitcoin-core
+```
+
 | File | Purpose |
 |------|---------|
 | `bip340_verify.h` | Circuit: `s·G - e·P = R` with x-only keys, double-and-add |
 | `bip340_witness.h` | Witness generator: `compute_from_scalars()` for testing, `compute()` for real sigs |
 | `bip340_guard.h` | CRT capacity guard: rejects `block_enc` exceeding `2^22` FFT order |
-| `bip340_test.cc` | 20 tests: eval, vectors, ZK prover/verifier, soundness, mutation, guard, params, scale |
+| `bip340_test.cc` | 21 tests: eval, vectors, ZK prover/verifier, soundness, mutation, guard, params, scale |
 
 **Proving backend:** Always use `CrtConvolutionFactory<CRT256<Fp256k1Base>, Fp256k1Base>`.
 The `bip340_guard.h` provides `check_crt_block_enc<CRT>()` to catch oversized

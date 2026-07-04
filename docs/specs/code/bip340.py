@@ -146,32 +146,22 @@ def _load_test_vectors() -> list:
     # Find the CSV relative to this source file.
     this_dir = os.path.dirname(os.path.abspath(__file__))
 
-    # Try the C++ testdata directory first, then the Sage specs dir.
-    candidates = [
-        os.path.join(this_dir, '..', '..', '..',
-                      'lib', 'circuits', 'bip340', 'testdata',
-                      'bip340_test_vectors.csv'),
-        os.path.join(this_dir, 'bip340_test_vectors.csv'),
-    ]
-    csv_path = None
-    for c in candidates:
-        if os.path.exists(c):
-            csv_path = c
-            break
-
-    if csv_path is None:
-        raise FileNotFoundError(
-            "bip340_test_vectors.csv not found in " + str(candidates))
+    csv_path = os.path.join(this_dir, '..', '..', '..',
+                            'lib', 'circuits', 'bip340', 'testdata',
+                            'bip340_test_vectors.csv')
+    if not os.path.exists(csv_path):
+        raise FileNotFoundError("bip340_test_vectors.csv not found at " +
+                                csv_path)
 
     vectors = []
     with open(csv_path, newline='', encoding='ascii') as f:
         reader = csv.DictReader(f)
         for row in reader:
             vectors.append({
-                'pk': bytes.fromhex(row['public_key']),
+                'pk': bytes.fromhex(row['public key']),
                 'msg': bytes.fromhex(row['message']) if row['message'] else b'',
                 'sig': bytes.fromhex(row['signature']),
-                'valid': row['verification_result'].upper() == 'TRUE',
+                'valid': row['verification result'].upper() == 'TRUE',
             })
     assert len(vectors) == 19, f"Expected 19 vectors, got {len(vectors)}"
     # Vector 18 has a 100-byte message (200 hex chars).
@@ -183,7 +173,6 @@ def _load_test_vectors() -> list:
 # BIP-340 test vectors loaded from shared CSV fixture.
 # Source: Bitcoin Core bip340_test_vectors.csv
 TEST_VECTORS = _load_test_vectors()
-    # Index 0
 
 
 def curve_order() -> int:
