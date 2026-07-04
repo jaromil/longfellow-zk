@@ -150,7 +150,7 @@ sudo apt install -y build-essential clang cmake libssl-dev libzstd-dev libgtest-
 
 ## Current State (2026-07-03)
 
-- **280/280 CTest tests pass** on main
+- **297/297 CTest tests pass** on main (297 includes 19 BIP-340 tests)
 - **secp256k1 field inversion and EC multi-exponentiation tests pass** (tests 53, 129)
 - **Native secp256k1 ZK proof code EXISTS but is NOT wired to CTest:**
   - `lib/circuits/tests/ec/pk_circuit_test.cc` — typed tests for P256 + P256K1
