@@ -227,6 +227,212 @@ TEST_F(Bip340EvalTest, WrongChallengeFails) {
   ASSERT_TRUE(ebk.assertion_failed());
 }
 
+// ====================== BIP-340 Test Vector Tests =======================
+
+// Helper: parse hex string to byte vector.
+inline std::vector<uint8_t> hex_vec(const char* hex) {
+  size_t len = std::strlen(hex);
+  std::vector<uint8_t> out(len / 2);
+  for (size_t i = 0; i < len; i += 2) {
+    auto val = [](char c) -> uint8_t {
+      if (c >= '0' && c <= '9') return c - '0';
+      if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+      if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+      return 0;
+    };
+    out[i / 2] = static_cast<uint8_t>((val(hex[i]) << 4) | val(hex[i + 1]));
+  }
+  return out;
+}
+
+struct Bip340RealVector {
+  const char* pk_hex;
+  const char* msg_hex;
+  const char* sig_hex;
+  bool valid;
+};
+
+// Upstream BIP-340 test vectors from Bitcoin Core.
+const Bip340RealVector kRealVectors[] = {
+    // Index 0
+    {"F9308A019258C31049344F85F89D5229B531C845836F99B08601F113BCE036F9",
+     "0000000000000000000000000000000000000000000000000000000000000000",
+     "E907831F80848D1069A5371B402410364BDF1C5F8307B0084C55F1CE2DCA8215"
+     "25F66A4A85EA8B71E482A74F382D2CE5EBEEE8FDB2172F477DF4900D310536C0",
+     true},
+    // Index 1
+    {"DFF1D77F2A671C5F36183726DB2341BE58FEAE1DA2DECED843240F7B502BA659",
+     "243F6A8885A308D313198A2E03707344A4093822299F31D0082EFA98EC4E6C89",
+     "6896BD60EEAE296DB48A229FF71DFE071BDE413E6D43F917DC8DCF8C78DE3341"
+     "8906D11AC976ABCCB20B091292BFF4EA897EFCB639EA871CFA95F6DE339E4B0A",
+     true},
+    // Index 15: empty message.
+    {"778CAA53B4393AC467774D09497A87224BF9FAB6F6E68B23086497324D6FD117",
+     "",
+     "71535DB165ECD9FBBC046E5FFAEA61186BB6AD436732FCCC25291A55895464CF"
+     "6069CE26BF03466228F19A3A62DB8A649F2D560FAC652827D1AF0574E427AB63",
+     true},
+    // Index 5: public key not on the curve.
+    {"EEFDEA4CDB677750A420FEE807EACF21EB9898AE79B9768766E4FAA04A2D4A34",
+     "243F6A8885A308D313198A2E03707344A4093822299F31D0082EFA98EC4E6C89",
+     "6CFF5C3BA86C69EA4B7376F31A9BCB4F74C1976089B2D9963DA2E5543E177769"
+     "69E89B4C5564D00349106B8497785DD7D1D713A8AE82B32FA79D5F7FC407D39B",
+     false},
+    // Index 7: negated message.
+    {"DFF1D77F2A671C5F36183726DB2341BE58FEAE1DA2DECED843240F7B502BA659",
+     "243F6A8885A308D313198A2E03707344A4093822299F31D0082EFA98EC4E6C89",
+     "1FA62E331EDBC21C394792D2AB1100A7B432B013DF3F6FF4F99FCB33E0E1515F"
+     "28890B3EDB6E7189B630448B515CE4F8622A954CFE545735AAEA5134FCCDB2BD",
+     false},
+    // Index 8: negated s value.
+    {"DFF1D77F2A671C5F36183726DB2341BE58FEAE1DA2DECED843240F7B502BA659",
+     "243F6A8885A308D313198A2E03707344A4093822299F31D0082EFA98EC4E6C89",
+     "6CFF5C3BA86C69EA4B7376F31A9BCB4F74C1976089B2D9963DA2E5543E177769"
+     "961764B3AA9B2FFCB6EF947B6887A226E8D7C93E00C5ED0C1834FF0D0C2E6DA6",
+     false},
+};
+
+TEST(Bip340RealVectorTest, EvalTestVectors) {
+  using EvalBackend = EvaluationBackend<Field>;
+  using LogicType = Logic<Field, EvalBackend>;
+  using EltW = typename LogicType::EltW;
+  using VerifyC = Bip340Verify<LogicType, Field, EC>;
+
+  const Field& F = p256k1_base;
+  const EC& ec = p256k1;
+
+  for (const auto& tv : kRealVectors) {
+    auto pk = hex_vec(tv.pk_hex);
+    auto msg = hex_vec(tv.msg_hex);
+    auto sig = hex_vec(tv.sig_hex);
+
+    Bip340Witness wit(ec);
+    bool computed = wit.compute(sig.data(), pk.data(),
+                                msg.data(), msg.size());
+
+    // For invalid pk (vector 5), compute() still returns true but
+    // the circuit should fail because py² != px³ + 7.
+    // For other invalid vectors, compute() succeeds but the circuit
+    // will detect the mismatch.
+    ASSERT_TRUE(computed || !tv.valid)
+        << "compute() failed for valid vector";
+
+    const EvalBackend ebk(F, tv.valid);
+    const LogicType l(&ebk, F);
+    VerifyC circuit(l, ec);
+
+    EltW rx = l.konst(F.to_montgomery(
+        Bip340Witness::nat_from_be_bytes(sig.data())));
+    EltW px = l.konst(F.to_montgomery(
+        Bip340Witness::nat_from_be_bytes(pk.data())));
+    EltW e = l.konst(wit.e_);
+
+    typename VerifyC::Witness w;
+    for (size_t i = 0; i < 256; ++i) {
+      w.bits_s[i] = l.konst(wit.bits_s_[i]);
+      w.bits_e[i] = l.konst(wit.bits_e_[i]);
+      if (i < 255) {
+        w.int_sx[i] = l.konst(wit.int_sx_[i]);
+        w.int_sy[i] = l.konst(wit.int_sy_[i]);
+        w.int_sz[i] = l.konst(wit.int_sz_[i]);
+        w.int_ex[i] = l.konst(wit.int_ex_[i]);
+        w.int_ey[i] = l.konst(wit.int_ey_[i]);
+        w.int_ez[i] = l.konst(wit.int_ez_[i]);
+      }
+    }
+    w.py = l.konst(wit.py_);
+
+    circuit.assert_verify(rx, px, e, w);
+
+    if (tv.valid) {
+      ASSERT_FALSE(ebk.assertion_failed())
+          << "Valid vector should pass";
+    } else {
+      ASSERT_TRUE(ebk.assertion_failed())
+          << "Invalid vector should fail";
+    }
+  }
+}
+
+TEST(Bip340RealVectorTest, ZkProverVerifier_Vector0) {
+  set_log_level(INFO);
+  const Field& F = p256k1_base;
+  const EC& ec = p256k1;
+
+  const auto& tv = kRealVectors[0];
+  auto pk = hex_vec(tv.pk_hex);
+  auto msg = hex_vec(tv.msg_hex);
+  auto sig = hex_vec(tv.sig_hex);
+
+  Bip340Witness wit(ec);
+  ASSERT_TRUE(wit.compute(sig.data(), pk.data(), msg.data(), msg.size()));
+
+  // Build circuit.
+  using CompilerBackendType = CompilerBackend<Field>;
+  using LogicCircuit = Logic<Field, CompilerBackendType>;
+  using EltWC = typename LogicCircuit::EltW;
+  using VerifyCC = Bip340Verify<LogicCircuit, Field, EC>;
+
+  QuadCircuit<Field> Q(F);
+  const CompilerBackendType cbk(&Q);
+  const LogicCircuit lc(&cbk, F);
+  VerifyCC circuit(lc, ec);
+
+  EltWC rx = lc.eltw_input();
+  EltWC px = lc.eltw_input();
+  EltWC e = lc.eltw_input();
+  Q.private_input();
+  typename VerifyCC::Witness w;
+  w.input(lc);
+  circuit.assert_verify(rx, px, e, w);
+  auto CIRCUIT = Q.mkcircuit(1);
+
+  auto W = std::make_unique<Dense<Field>>(1, CIRCUIT->ninputs);
+  {
+    DenseFiller<Field> filler(*W);
+    filler.push_back(F.one());
+    filler.push_back(F.to_montgomery(
+        Bip340Witness::nat_from_be_bytes(sig.data())));  // rx
+    filler.push_back(F.to_montgomery(
+        Bip340Witness::nat_from_be_bytes(pk.data())));  // px
+    filler.push_back(wit.e_);
+    wit.fill_witness(filler);
+  }
+
+  using Crt = CRT256<Field>;
+  using ConvolutionFactory = CrtConvolutionFactory<Crt, Field>;
+  using RSFactory = ReedSolomonFactory<Field, ConvolutionFactory>;
+
+  ConvolutionFactory factory(F);
+  RSFactory rsf(factory, F);
+
+  Transcript tp((uint8_t*)"bip340 real vec0", 16);
+  SecureRandomEngine rng;
+
+  ZkProof<Field> zkpr(*CIRCUIT, kRate, kQueries);
+  ZkProver<Field, RSFactory> prover(*CIRCUIT, F, rsf);
+  prover.commit(zkpr, *W, tp, rng);
+  prover.prove(zkpr, *W, tp);
+  log(INFO, "BIP-340 real-vector prover done");
+
+  Transcript trv((uint8_t*)"bip340 real vec0", 16);
+  auto pub = Dense<Field>(1, CIRCUIT->npub_in);
+  {
+    DenseFiller<Field> filler(pub);
+    filler.push_back(F.one());
+    filler.push_back(F.to_montgomery(
+        Bip340Witness::nat_from_be_bytes(sig.data())));
+    filler.push_back(F.to_montgomery(
+        Bip340Witness::nat_from_be_bytes(pk.data())));
+    filler.push_back(wit.e_);
+  }
+
+  ZkVerifier<Field, RSFactory> verifier(*CIRCUIT, rsf, kRate, kQueries, F);
+  verifier.recv_commitment(zkpr, trv);
+  EXPECT_TRUE(verifier.verify(zkpr, pub, trv));
+  log(INFO, "BIP-340 real-vector verifier done");
+}
+
 // ========================= Circuit Size ==================================
 
 TEST(Bip340SizeTest, CircuitSize) {
