@@ -73,6 +73,12 @@ class Bip340Witness {
   // P.y (the even square root of px³ + b).
   Elt py_;
 
+  // R.y (affine, the canonical even y-coordinate of R), its inverse z,
+  // and its 256-bit decomposition.
+  Elt ry_;
+  Elt rz_inv_;
+  Elt bits_ry_[kBits];
+
   // Challenge e as a base-field element (Montgomery form).
   Elt e_;
   // Challenge e as a Nat (for native verification).
@@ -96,6 +102,9 @@ class Bip340Witness {
     typename EC::ECPoint P = {px, py, F.one()};
     compute_scalar_mult_witness(bits_e_, int_ex_, int_ey_, int_ez_, P,
                                 e_nat);
+
+    // Compute R = sG - eP and derive ry, rz_inv, bits_ry.
+    compute_ry_witness();
     return true;
   }
 
@@ -164,6 +173,9 @@ class Bip340Witness {
     compute_scalar_mult_witness(bits_e_, int_ex_, int_ey_, int_ez_, P,
                                 e_nat);
 
+    // -- Compute R = sG - eP, derive ry, rz_inv, bits_ry ----------------
+    compute_ry_witness();
+
     return true;
   }
 
@@ -198,9 +210,53 @@ class Bip340Witness {
     }
     // P.y
     filler.push_back(py_);
+    // R.y (affine), rz_inv, bits_ry
+    filler.push_back(ry_);
+    filler.push_back(rz_inv_);
+    for (size_t i = 0; i < kBits; ++i) {
+      filler.push_back(bits_ry_[i]);
+    }
   }
 
  private:
+  /// Fill bits[kBits] from a Nat value, MSB-first.
+  void fill_bits(Elt bits[kBits], const Nat& value) const {
+    const Field& F = ec_.f_;
+    for (size_t i = 0; i < kBits; ++i) {
+      size_t bit_idx = kBits - 1 - i;  // MSB first
+      bits[i] = F.of_scalar(value.bit(bit_idx));
+    }
+  }
+
+  /// Compute R = s·G - e·P from the already-computed intermediate
+  /// points, derive ry_, rz_inv_, and bits_ry_.  The intermediate
+  /// points were produced by compute_scalar_mult_witness using
+  /// the same double-and-add formulas as the circuit, so projective
+  /// coordinates match.
+  void compute_ry_witness() {
+    const Field& F = ec_.f_;
+
+    // sG and eP are in int_s*_[kBits-1] and int_e*_[kBits-1].
+    typename EC::ECPoint sG_pt = {int_sx_[kBits-1], int_sy_[kBits-1],
+                                   int_sz_[kBits-1]};
+    typename EC::ECPoint eP_pt = {int_ex_[kBits-1], int_ey_[kBits-1],
+                                   int_ez_[kBits-1]};
+
+    // R = sG - eP.
+    auto neg_eP = typename EC::ECPoint{eP_pt.x, F.negf(eP_pt.y), eP_pt.z};
+    ec_.addE(sG_pt, neg_eP);
+
+    // rz_inv: inverse of projective R.z.
+    rz_inv_ = F.invertf(sG_pt.z);
+
+    // Normalize to get affine ry.
+    Elt rz_inv_y = F.invertf(sG_pt.z);
+    ry_ = F.mulf(sG_pt.y, rz_inv_y);
+
+    // Decompose ry into bits, MSB-first.
+    Nat ry_nat = F.from_montgomery(ry_);
+    fill_bits(bits_ry_, ry_nat);
+  }
   /// BIP-340 tagged hash: SHA256(SHA256(tag) || SHA256(tag) || R.x || P.x || msg).
   static void compute_tagged_hash(uint8_t hash[32],
                                   const uint8_t r_bytes[32],
