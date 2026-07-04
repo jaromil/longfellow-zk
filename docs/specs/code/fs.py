@@ -1,13 +1,7 @@
 #
-# Uses AES when pycryptodome is installed in the environment:
-#   `sage --pip install pycryptodome`
-# Otherwise falls back to a deterministic SHA-256 block generator for tests.
+# Deterministic SHA-256 block generator for the Sage reference tests.
 # To run this test in sage, run `sage --python fs.py`
 #
-try:
-    from Crypto.Cipher import AES
-except ModuleNotFoundError:
-    AES = None
 from sage.rings.finite_rings.element_base import FiniteRingElement
 from sage.rings.finite_rings.finite_field_base import FiniteField
 
@@ -26,7 +20,7 @@ class FSPRF:
     """
     Fiat-Shamir Pseudorandom Function object.
     Produces an infinite stream of bytes organized in 16-byte blocks.
-    Block i = AES256(SEED, ID(i))
+    Block i = SHA256(SEED || ID(i))[0:16].
     """
 
     def __init__(self, seed: bytes) -> None:
@@ -34,7 +28,6 @@ class FSPRF:
         self.seed = seed
         self.counter = 0
         self.buffer = bytearray()
-        self.cipher = AES.new(seed, AES.MODE_ECB) if AES is not None else None
 
     def bytes(self, n: int) -> bytes:
         """Returns the next n bytes in the stream."""
@@ -43,11 +36,7 @@ class FSPRF:
             # block_id is the 16-byte little-endian representation of integer i
             block_id = self.counter.to_bytes(16, 'little')
 
-            if self.cipher is not None:
-                # Block i = AES256(SEED, ID(i))
-                block_output = self.cipher.encrypt(block_id)
-            else:
-                block_output = hashlib.sha256(self.seed + block_id).digest()[:16]
+            block_output = hashlib.sha256(self.seed + block_id).digest()[:16]
 
             self.buffer.extend(block_output)
             self.counter += 1
