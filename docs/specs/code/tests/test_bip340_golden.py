@@ -68,7 +68,7 @@ class TestBip340Golden(unittest.TestCase):
             # Recompute and compare.
             w = make_bip340_witness(sig, pk, msg)
 
-            def fe_hex(idx):
+            def fe_hex(idx: int) -> str:
                 return hex(int(w[idx]))[2:].upper().zfill(64)
 
             self.assertEqual(fe_hex(3), fact['e_hex'],

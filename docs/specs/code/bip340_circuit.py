@@ -17,10 +17,10 @@ lib/circuits/bip340/bip340_witness.h.
 """
 
 import hashlib
-from typing import List, Optional, Tuple
+from typing import Optional, Tuple
 
-import sage.all
-from sage.rings.finite_rings.finite_field_constructor import GF
+import sage.all  # type: ignore[import-untyped]
+from sage.rings.finite_rings.element_base import FiniteRingElement
 
 from circuit import Circuit, CircuitLayer, Quad
 from fields import Fp256k1
@@ -164,7 +164,7 @@ def make_bip340_witness(
     sig_bytes: bytes,
     pk_bytes: bytes,
     msg: bytes,
-) -> List[int]:
+) -> list[FiniteRingElement]:
     """
     Generate witness for make_bip340_test_circuit().
 
